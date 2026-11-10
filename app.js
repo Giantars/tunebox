@@ -63,6 +63,7 @@ const DB = (() => {
     del: (n, k) => tx(n, 'readwrite', s => s.delete(k)),
     all: n => tx(n, 'readonly', s => s.getAll()),
     keys: n => tx(n, 'readonly', s => s.getAllKeys()),
+    putMany: (n, arr) => tx(n, 'readwrite', s => { arr.forEach(v => s.put(v)); return null; }),
   };
 })();
 
@@ -88,6 +89,9 @@ const settings = {
   jamendoId: store.get('jamendoId', ''),
   autoSave: store.get('autoSave', true),
   ytKey: store.get('ytKey', ''),
+  gClientId: store.get('gClientId', ''),
+  gFolder: store.get('gFolder', 'Tunebox'),
+  lookup: store.get('lookup', true),
 };
 
 const audio = $('#audio');
@@ -303,6 +307,7 @@ async function pumpDl() {
     catch (e) {
       console.warn('save failed', t.title, e);
       if (e && e.name === 'QuotaExceededError') toast('Phone storage full — remove some downloads');
+      if (e && e.message === 'DRIVE_AUTH') dlQueue.splice(0).forEach(x => S.downloading.delete(x.id));
     }
     S.downloading.delete(t.id);
     refreshRows();
@@ -310,35 +315,72 @@ async function pumpDl() {
   }
   dlBusy = false;
 }
-async function doCache(t) {
-  const ac = new AbortController();
-  const tm = setTimeout(() => ac.abort(), 180000);
-  let buf, type;
-  try {
-    const r = await fetch(streamUrl(t), { signal: ac.signal });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const len = +r.headers.get('content-length') || 0;
-    if (len > MAX_SAVE_BYTES) throw new Error('too big');
-    type = r.headers.get('content-type') || 'audio/mpeg';
-    buf = await r.arrayBuffer();
-  } finally { clearTimeout(tm); }
-  if (buf.byteLength < 20000) throw new Error('response too small');
-  if (buf.byteLength > MAX_SAVE_BYTES) throw new Error('too big');
-  await DB.put('blobs', { buf, type, size: buf.byteLength }, t.id);
-  if (t.art) {
+function fetchAudio(t, signal) {
+  if (t.source === 'drive') return gdFetch(`${GDAPI}/files/${encodeURIComponent(t.rid)}?alt=media`, { signal });
+  return fetch(streamUrl(t), { signal });
+}
+// Download a song. Returns its Blob; stores it on the phone when doStore. Parallel calls share one download.
+const inflight = new Map();
+function doCache(t, { store: doStore = true } = {}) {
+  if (inflight.has(t.id)) return inflight.get(t.id);
+  const p = (async () => {
+    const ac = new AbortController();
+    const tm = setTimeout(() => ac.abort(), 180000);
+    let buf, type;
     try {
-      const ar = await fetch(t.art);
-      if (ar.ok) {
-        await DB.put('blobs', { buf: await ar.arrayBuffer(), type: ar.headers.get('content-type') || 'image/jpeg' }, t.id + '#art');
-        t.hasArt = true;
-      }
-    } catch { /* artwork optional */ }
+      const r = await fetchAudio(t, ac.signal);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const len = +r.headers.get('content-length') || 0;
+      if (len > MAX_SAVE_BYTES) throw new Error('too big');
+      type = r.headers.get('content-type') || 'audio/mpeg';
+      if (!type.startsWith('audio/')) type = guessType(t.title + '.' + (t.ext || 'mp3'));
+      buf = await r.arrayBuffer();
+    } finally { clearTimeout(tm); }
+    if (buf.byteLength < 20000) throw new Error('response too small');
+    if (buf.byteLength > MAX_SAVE_BYTES) throw new Error('too big');
+    const blob = new Blob([buf], { type });
+    const c = canon(t);
+    if (c.source === 'drive' && !c.tagged) await applyTags(c, blob);
+    if (doStore) {
+      await DB.put('blobs', { buf, type, size: buf.byteLength }, t.id);
+      if (c.art && !c.hasArt) await storeArtFromUrl(c);
+      Object.assign(c, { saved: Date.now(), size: buf.byteLength });
+      S.cached.add(t.id);
+      requestPersist();
+    }
+    await saveTrack(c);
+    return blob;
+  })();
+  inflight.set(t.id, p);
+  p.then(() => inflight.delete(t.id), () => inflight.delete(t.id));
+  return p;
+}
+async function storeArtFromUrl(c) {
+  try {
+    const ar = await fetch(c.art);
+    if (!ar.ok) return;
+    await DB.put('blobs', { buf: await ar.arrayBuffer(), type: ar.headers.get('content-type') || 'image/jpeg' }, c.id + '#art');
+    c.hasArt = true;
+  } catch { /* artwork optional */ }
+}
+// Read ID3 title/artist/album/cover from a downloaded Drive song.
+async function applyTags(c, blob) {
+  c.tagged = 1;
+  const tags = await readTags(blob);
+  if (tags.title) { c.title = tags.title; c.named = 'tags'; }
+  if (tags.artist) c.artist = tags.artist;
+  if (tags.album) c.album = tags.album;
+  if (tags.pic) {
+    try {
+      const d = tags.pic.data;
+      await DB.put('blobs', { buf: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength), type: tags.pic.mime }, c.id + '#art');
+      c.hasArt = true;
+      c.art = '';
+      if (artUrls.has(c.id)) { URL.revokeObjectURL(artUrls.get(c.id)); artUrls.delete(c.id); }
+    } catch { /* ignore */ }
   }
-  const c = canon(t);
-  Object.assign(c, { saved: Date.now(), size: buf.byteLength, hasArt: t.hasArt || c.hasArt });
-  await saveTrack(c);
-  S.cached.add(t.id);
-  requestPersist();
+  if (tags.title || tags.pic) { lastArtId = null; setTimeout(() => { softRender(); renderPlayer(); }, 0); }
+  if (!c.hasArt && !c.art) enqueueLookup(c, true);
 }
 async function getBlob(id) {
   const r = await DB.get('blobs', id);
@@ -358,6 +400,189 @@ function requestPersist() {
   if (persistAsked) return;
   persistAsked = true;
   try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch { /* not supported */ }
+}
+
+/* ---------------- Google Drive (your own MP3s in the cloud) ---------------- */
+const GDAPI = 'https://www.googleapis.com/drive/v3';
+const GD_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+const AUDIO_EXT = /\.(mp3|m4a|aac|wav|flac|ogg|opus|mp4)$/i;
+function gdRedirectUri() { return location.origin + location.pathname.replace(/index\.html$/, ''); }
+function gdToken() { const x = store.get('gdTok', null); return x && x.exp > Date.now() + 60000 ? x.t : null; }
+function gdConnect(silent = false) {
+  if (!settings.gClientId) { toast('Add your Google client ID in Settings first'); return; }
+  saveQueue();
+  const state = uid();
+  store.set('gdState', state);
+  store.set('gdReturnTab', S.tab);
+  const p = new URLSearchParams({
+    client_id: settings.gClientId, redirect_uri: gdRedirectUri(), response_type: 'token',
+    scope: GD_SCOPE, include_granted_scopes: 'true', state,
+  });
+  if (silent) p.set('prompt', 'none');
+  location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + p;
+}
+// Google sends us back to the app with #access_token=… (or #error=…).
+function gdHandleRedirect() {
+  if (!location.hash || !/(access_token|error)=/.test(location.hash)) return false;
+  const h = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search);
+  if (h.get('state') !== store.get('gdState', '')) return false;
+  store.set('gdState', '');
+  S.tab = store.get('gdReturnTab', 'library') || 'library';
+  if (h.get('access_token')) {
+    store.set('gdTok', { t: h.get('access_token'), exp: Date.now() + (+h.get('expires_in') || 3600) * 1000 });
+    store.set('gdEver', true);
+    return true;
+  }
+  const err = h.get('error');
+  if (err && !/interaction_required|login_required|consent_required/.test(err)) toast('Google sign-in failed: ' + err);
+  return false;
+}
+async function gdFetch(url, opts = {}) {
+  const tok = gdToken();
+  if (!tok) throw new Error('DRIVE_AUTH');
+  const r = await fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + tok } });
+  if (r.status === 401) { store.set('gdTok', null); throw new Error('DRIVE_AUTH'); }
+  return r;
+}
+async function gdJSON(url) {
+  const r = await gdFetch(url);
+  if (!r.ok) {
+    let m = 'HTTP ' + r.status;
+    try { const j = await r.json(); if (j.error && j.error.message) m = j.error.message; } catch { /* ignore */ }
+    throw new Error(m);
+  }
+  return r.json();
+}
+function driveAuthSheet() {
+  sheet('<div class="t">Google Drive sign-in expired</div>', [
+    { label: 'Reconnect Google Drive', fn: () => gdConnect() },
+  ]);
+}
+// Names from the file path: "Artist - Title.mp3", "01 Title.mp3"; folders = artist / album.
+function nameFromFile(fname, path) {
+  let base = fname.replace(/\.[^.]+$/, '').replace(/_/g, ' ').trim();
+  base = base.replace(/^\d{1,3}\s*[-.)]?\s+/, '');
+  let title = base, artist = '', album = '';
+  const parts = base.split(/\s+[-–—]\s+/);
+  if (parts.length >= 2) { artist = parts[0].trim(); title = parts.slice(1).join(' - ').trim(); }
+  if (!artist && path.length) artist = path[0];
+  if (path.length >= 2) album = path[path.length - 1];
+  return { title: title || fname, artist: artist || 'Unknown artist', album };
+}
+let syncing = false;
+async function driveSync() {
+  if (syncing) return;
+  if (!navigator.onLine) { toast("You're offline"); return; }
+  if (!gdToken()) { gdConnect(); return; }
+  syncing = true;
+  toast('Syncing Google Drive…');
+  try {
+    const folder = settings.gFolder || 'Tunebox';
+    const qn = folder.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const root = await gdJSON(`${GDAPI}/files?q=${encodeURIComponent(`name='${qn}' and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id,name)&pageSize=10`);
+    if (!root.files || !root.files.length) { toast(`No folder called "${folder}" in your Google Drive`); return; }
+    const todo = root.files.map(f => ({ id: f.id, path: [] }));
+    const found = [];
+    while (todo.length) {
+      const dir = todo.shift();
+      let pt = '';
+      do {
+        const q = encodeURIComponent(`'${dir.id}' in parents and trashed=false`);
+        const j = await gdJSON(`${GDAPI}/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,size)&pageSize=1000${pt ? '&pageToken=' + pt : ''}`);
+        for (const f of j.files || []) {
+          if (f.mimeType === 'application/vnd.google-apps.folder') todo.push({ id: f.id, path: [...dir.path, f.name] });
+          else if ((f.mimeType || '').startsWith('audio/') || AUDIO_EXT.test(f.name)) found.push({ ...f, path: dir.path });
+        }
+        pt = j.nextPageToken || '';
+      } while (pt);
+    }
+    const seen = new Set(), fresh = [];
+    for (const f of found) {
+      const id = 'gd:' + f.id;
+      seen.add(id);
+      if (S.tracks.has(id)) continue;
+      const n = nameFromFile(f.name, f.path);
+      fresh.push({ id, source: 'drive', rid: f.id, ...n, duration: 0, size: +f.size || 0, ext: (f.name.split('.').pop() || 'mp3').toLowerCase(), fname: f.name, added: Date.now() });
+    }
+    if (fresh.length) { await DB.putMany('tracks', fresh); fresh.forEach(t => { S.tracks.set(t.id, t); enqueueLookup(t); }); }
+    let removed = 0;
+    for (const t of [...S.tracks.values()]) {
+      if (t.source === 'drive' && !seen.has(t.id)) { await deleteLocal(t); removed++; }
+    }
+    store.set('gdLastSync', Date.now());
+    toast(`Google Drive: ${found.length} songs${fresh.length ? ` (${fresh.length} new)` : ''}${removed ? `, ${removed} removed` : ''}`);
+    render();
+  } catch (e) {
+    if (e.message === 'DRIVE_AUTH') gdConnect();
+    else toast('Drive sync failed: ' + e.message);
+  } finally { syncing = false; }
+}
+
+/* ---------------- Covers + names from the iTunes catalog (free, no key) ---------------- */
+const lookupQ = [];
+let lookupBusy = false;
+const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+function enqueueLookup(t, front = false) {
+  if (!settings.lookup || !t || t.looked || (t.source !== 'drive' && t.source !== 'local')) return;
+  if (lookupQ.some(x => x.id === t.id)) return;
+  front ? lookupQ.unshift(t) : lookupQ.push(t);
+  pumpLookup();
+}
+async function pumpLookup() {
+  if (lookupBusy) return;
+  lookupBusy = true;
+  while (lookupQ.length && navigator.onLine) {
+    const t = lookupQ.shift();
+    try { await lookupOne(canon(t)); } catch (e) { console.warn('lookup', e); }
+    await new Promise(r => setTimeout(r, 3200)); // iTunes allows about 20 lookups a minute
+  }
+  lookupBusy = false;
+}
+async function lookupOne(c) {
+  if (c.looked || !S.tracks.has(c.id)) return;
+  const known = c.artist && c.artist !== 'Unknown artist';
+  const country = ((navigator.language || 'en-US').split('-')[1] || 'US').toUpperCase();
+  const nt = norm(c.title), na = norm(c.artist);
+  // never pick covers/edits unless the file itself is one
+  const FAKE = /\b(karaoke|type beat|sped up|slowed|reverb|nightcore|instrumental|cover|tribute|originally performed|8d)\b/i;
+  const allowFake = FAKE.test(c.title);
+  const terms = known ? [c.artist + ' ' + c.title, c.title] : [c.title];
+  let best = null, bestScore = 0;
+  for (const term of terms) {
+    const j = await fetchJSON(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=25&country=${country}`);
+    for (const r of j.results || []) {
+      if (!allowFake && (FAKE.test(r.trackName) || FAKE.test(r.collectionName || ''))) continue;
+      const rt = norm(r.trackName), ra = norm(r.artistName);
+      let sc = 0;
+      if (rt === nt) sc += 3;
+      else if (rt && nt && (rt.includes(nt) || nt.includes(rt))) sc += 2;
+      else continue;
+      if (known && na) {
+        if (ra.includes(na) || na.includes(ra) || ra.split(' ')[0] === na.split(' ')[0]) sc += 2;
+        else continue;
+      }
+      if (sc > bestScore) { best = r; bestScore = sc; }
+    }
+    if (best) break;
+  }
+  c.looked = 1;
+  if (best) {
+    if (!c.hasArt && best.artworkUrl100) {
+      c.art = best.artworkUrl100.replace(/\/\d+x\d+bb\./, '/600x600bb.');
+      if (S.cached.has(c.id)) await storeArtFromUrl(c);
+    }
+    if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; }
+    if (!c.album && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
+    if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
+  }
+  await saveTrack(c);
+  if (best) {
+    $$(`[data-tid="${CSS.escape(c.id)}"]`).forEach(el => { const src = artSrc(c); if (src) swapArt(el, src); });
+    const cur = curTrack();
+    if (cur && cur.id === c.id) { lastArtId = null; renderPlayer(); updateMediaSession(c); }
+  }
 }
 
 /* ---------------- Artwork ---------------- */
@@ -470,7 +695,9 @@ async function playIndex(i, opts = {}) {
   const tok = ++playToken;
   const isCached = S.cached.has(t.id);
   // YouTube can't play with the screen locked / app in background: skip those songs then.
-  if (!isCached && (t.source === 'local' || !navigator.onLine || (t.source === 'youtube' && document.hidden))) {
+  // Drive songs need a sign-in; while locked we can't show the sign-in page, so skip to a saved song.
+  if (!isCached && (t.source === 'local' || !navigator.onLine || (t.source === 'youtube' && document.hidden)
+      || (t.source === 'drive' && !gdToken() && document.hidden))) {
     if (tries + 1 < S.queue.length) return playIndex(i + dir, { dir, tries: tries + 1 });
     toast(navigator.onLine ? 'Nothing playable in this list' : 'Offline — none of these songs are saved yet');
     return;
@@ -488,10 +715,28 @@ async function playIndex(i, opts = {}) {
   ytStop();
   let blob = null;
   if (isCached) { try { blob = await getBlob(t.id); } catch (e) { console.warn(e); } }
+  if (!blob && t.source === 'drive') {
+    // Drive needs a sign-in header, so the song is downloaded first, then played (and kept if auto-save is on).
+    if (curObjUrl) { audio.pause(); }
+    renderPlayer();
+    setStatus('Loading from Drive…');
+    S.downloading.add(t.id); refreshRows();
+    try { blob = await doCache(t, { store: settings.autoSave }); }
+    catch (e) {
+      if (tok !== playToken) return;
+      setStatus('');
+      // sign-in expired: try a quick automatic re-sign-in first; the app reopens on the same song
+      if (e.message === 'DRIVE_AUTH') { if (store.get('gdEver', false)) gdConnect(true); else driveAuthSheet(); }
+      else toast("Couldn't load from Drive: " + e.message);
+      return;
+    } finally { S.downloading.delete(t.id); refreshRows(); }
+    if (tok !== playToken) return;
+    setStatus('');
+  }
   if (tok !== playToken) return;
   if (curObjUrl) { URL.revokeObjectURL(curObjUrl); curObjUrl = null; }
   if (blob) { curObjUrl = URL.createObjectURL(blob); audio.src = curObjUrl; }
-  else if (t.source !== 'local' && navigator.onLine) { S.cached.delete(t.id); audio.src = streamUrl(t); }
+  else if (t.source !== 'local' && t.source !== 'drive' && navigator.onLine) { S.cached.delete(t.id); audio.src = streamUrl(t); }
   else { toast("Can't play " + t.title); return; }
   if (opts.seek) audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = opts.seek; } catch { /* ignore */ } }, { once: true });
   if (opts.autoplay !== false) { const p = audio.play(); if (p) p.catch(e => { if (e.name !== 'AbortError') console.warn('play', e); }); }
@@ -777,19 +1022,15 @@ async function importFiles(files) {
       if (tags.pic) {
         try { await DB.put('blobs', { buf: tags.pic.data.buffer.slice(tags.pic.data.byteOffset, tags.pic.data.byteOffset + tags.pic.data.byteLength), type: tags.pic.mime }, id + '#art'); hasArt = true; } catch { /* ignore */ }
       }
-      const base = f.name.replace(/\.[^.]+$/, '').replace(/_/g, ' ');
-      let title = tags.title, artist = tags.artist;
-      if (!title) {
-        const parts = base.split(' - ');
-        if (parts.length >= 2) { artist = artist || parts[0].trim(); title = parts.slice(1).join(' - ').trim(); }
-        else title = base;
-      }
+      const fromName = nameFromFile(f.name, []);
       const t = {
-        id, source: 'local', title, artist: artist || 'Unknown artist', album: tags.album || '',
+        id, source: 'local', title: tags.title || fromName.title, artist: tags.artist || fromName.artist,
+        album: tags.album || '', named: tags.title ? 'tags' : '',
         duration: await probeDuration(f), hasArt, added: Date.now(), saved: Date.now(), size: buf.byteLength, fname: f.name,
       };
       await saveTrack(t);
       S.cached.add(id);
+      if (!hasArt || !tags.title) enqueueLookup(t);
       n++;
     } catch (e) {
       console.warn('import', f.name, e);
@@ -859,6 +1100,8 @@ const ICONS = {
   download: ['s', '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'],
   clock: ['s', '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'],
   folder: ['s', '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'],
+  cloud: ['s', '<path d="M7 18.5a4.5 4.5 0 0 1-.7-8.95A6 6 0 0 1 17.8 8.6 4.5 4.5 0 0 1 17.5 18.5z"/>'],
+  sync: ['s', '<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>'],
   list: ['s', '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1" fill="currentColor"/><circle cx="4.5" cy="12" r="1" fill="currentColor"/><circle cx="4.5" cy="18" r="1" fill="currentColor"/>'],
   plus: ['s', '<path d="M12 5v14M5 12h14"/>'],
   x: ['s', '<path d="M6 6l12 12M18 6 6 18"/>'],
@@ -896,7 +1139,9 @@ function viewHome() {
   h += `<div class="quick">
     <button data-act="open" data-type="liked">${icon('heartOn')}Liked</button>
     <button data-act="open" data-type="offline">${icon('download')}Downloaded <span class="small">${nOff}</span></button>
-    <button data-act="open" data-type="local">${icon('folder')}My files</button>
+    ${settings.gClientId
+    ? `<button data-act="open" data-type="drive">${icon('cloud')}My music</button>`
+    : `<button data-act="open" data-type="local">${icon('folder')}My files</button>`}
     <button data-act="tab" data-tab="search">${icon('search')}Find music</button></div>`;
   if (recent.length) {
     h += `<h2>Recently played</h2><div class="cards">${recent.map((t, i) => `<div class="card" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>`).join('')}</div>`;
@@ -972,6 +1217,11 @@ function listFor(sub) {
     case 'liked': return { title: 'Liked songs', arr: all.filter(t => t.liked).sort((a, b) => b.liked - a.liked), empty: 'Tap the heart on any song to add it here.' };
     case 'offline': return { title: 'Downloaded', arr: all.filter(t => S.cached.has(t.id) && t.source !== 'local').sort((a, b) => (b.saved || 0) - (a.saved || 0)), empty: 'Songs save here automatically after you play them.' };
     case 'recent': return { title: 'Recently played', arr: all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 150), empty: 'Nothing played yet.' };
+    case 'drive': return {
+      title: 'Google Drive',
+      arr: all.filter(t => t.source === 'drive').sort((a, b) => a.artist.localeCompare(b.artist) || a.title.localeCompare(b.title)),
+      empty: settings.gClientId ? `Put your MP3s in a Google Drive folder called "${settings.gFolder || 'Tunebox'}", then tap Sync.` : 'Set up Google Drive in Settings first.',
+    };
     case 'local': return { title: 'My files', arr: all.filter(t => t.source === 'local').sort((a, b) => a.title.localeCompare(b.title)), empty: 'Add MP3/M4A files from the Files app.' };
     case 'pl': {
       const p = S.playlists.find(x => x.id === sub.id);
@@ -988,9 +1238,11 @@ function viewLibrary() {
     offline: all.filter(t => S.cached.has(t.id) && t.source !== 'local').length,
     recent: all.filter(t => t.lastPlayed).length,
     local: all.filter(t => t.source === 'local').length,
+    drive: all.filter(t => t.source === 'drive').length,
   };
   const item = (type, ic, label) => `<button class="lib-item" data-act="open" data-type="${type}">${icon(ic)}${label}<span class="n">${c[type]}</span></button>`;
   let h = `<h1>Library<span class="offline-pill">Offline</span></h1>`
+    + (settings.gClientId || c.drive ? item('drive', 'cloud', 'Google Drive') : '')
     + item('liked', 'heartOn', 'Liked songs') + item('offline', 'download', 'Downloaded')
     + item('recent', 'clock', 'Recently played') + item('local', 'folder', 'My files');
   h += `<h2>Playlists <button class="addpl" data-act="new-pl">+ New</button></h2>`;
@@ -1005,6 +1257,11 @@ function viewList() {
   let h = `<button class="backbar" data-act="back">${icon('back')}Library</button>
     <div class="titlebar"><h1>${esc(L.title)}</h1>${L.pl ? `<button class="icon more" data-act="pl-menu" data-id="${esc(L.pl.id)}">${icon('more')}</button>` : ''}</div>`;
   if (S.sub.type === 'local') h += `<div class="list-head"><button class="btn primary" data-act="import">${icon('plus')}Add music files</button></div>`;
+  if (S.sub.type === 'drive' && settings.gClientId) {
+    const last = store.get('gdLastSync', 0);
+    h += `<div class="list-head"><button class="btn primary" data-act="gd-sync">${icon('sync')}${last ? 'Sync' : 'Connect & sync'}</button></div>`
+      + (last ? `<div class="small" style="margin:-4px 0 10px">Last synced ${new Date(last).toLocaleString()}. Songs stream from Drive and are kept on the phone after you play them.</div>` : '');
+  }
   if (L.arr.length) {
     h += `<div class="list-head"><button class="btn" data-act="play-all" data-list="${esc(key)}">${icon('play')}Play</button><button class="btn" data-act="shuffle-all" data-list="${esc(key)}">${icon('shuffle')}Shuffle</button></div>`;
     h += rows(key, L.arr);
@@ -1014,6 +1271,13 @@ function viewList() {
 function viewSettings() {
   return `<h1>Settings</h1>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
+  <div class="group"><div class="set-head">Google Drive (your own music)</div>
+    <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
+    <input id="gClientId" class="field" placeholder="…apps.googleusercontent.com" value="${esc(settings.gClientId)}" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <input id="gFolder" class="field" placeholder="Folder name in Drive" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="small" style="margin-bottom:10px">${gdToken() ? 'Connected.' : store.get('gdEver', false) ? 'Signed out (Google sign-ins last about an hour; saved songs still play).' : 'Not connected yet.'}</div>
+    <div class="list-head"><button class="btn" data-act="save-gd">Save</button><button class="btn primary" data-act="gd-sync">${gdToken() ? 'Sync now' : 'Connect'}</button></div></div>
+  <div class="group"><label class="set-row"><span>Find covers and song names online<small>For your own MP3s without proper tags, looks the song up in the iTunes catalog for the cover, title, artist and album.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">YouTube key</div>
     <div class="small">Free, no card needed. At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>: create a project, enable <b>YouTube Data API v3</b>, then Credentials, Create credentials, API key. About 100 new searches a day; repeat searches are remembered and cost nothing.</div>
     <input id="ytKey" class="field" placeholder="AIza…" value="${esc(settings.ytKey)}" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -1062,6 +1326,7 @@ function render() {
   if (S.tab === 'search') renderResults();
   if (S.tab === 'settings') updateStorageInfo();
 }
+function softRender() { if (S.tab === 'search') renderResults(); else render(); }
 let rrTimer = null;
 function refreshRows() {
   clearTimeout(rrTimer);
@@ -1292,6 +1557,19 @@ const actions = {
     store.set('jamendoId', settings.jamendoId);
     toast(settings.jamendoId ? 'Jamendo key saved' : 'Jamendo key cleared');
   },
+  'save-gd': () => {
+    settings.gClientId = ($('#gClientId').value || '').trim();
+    settings.gFolder = ($('#gFolder').value || '').trim() || 'Tunebox';
+    store.set('gClientId', settings.gClientId);
+    store.set('gFolder', settings.gFolder);
+    toast('Google Drive settings saved');
+    render();
+  },
+  'gd-sync': () => {
+    const inp = $('#gClientId');
+    if (inp && inp.value.trim() !== settings.gClientId) actions['save-gd']();
+    driveSync();
+  },
   'save-yt': () => {
     settings.ytKey = ($('#ytKey').value || '').trim();
     store.set('ytKey', settings.ytKey);
@@ -1327,6 +1605,11 @@ document.addEventListener('submit', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'autoSave') { settings.autoSave = e.target.checked; store.set('autoSave', settings.autoSave); }
+  if (e.target.id === 'lookup') {
+    settings.lookup = e.target.checked;
+    store.set('lookup', settings.lookup);
+    if (settings.lookup) [...S.tracks.values()].forEach(t => enqueueLookup(t));
+  }
   if (e.target.id === 'filepick') { importFiles(e.target.files).finally(() => { e.target.value = ''; }); }
 });
 const seekEl = $('#seek');
@@ -1357,10 +1640,20 @@ async function init() {
     S.playlists = pls.sort((a, b) => a.created - b.created);
   } catch (e) { toast('Storage unavailable: ' + e.message); }
   restoreQueue();
+  const hadHash = /(access_token|error)=/.test(location.hash);
+  const justConnected = gdHandleRedirect();
+  if (hadHash && !justConnected && store.get('gdEver', false) && !gdToken()) setTimeout(driveAuthSheet, 300);
   render();
   renderPlayer();
   if (S.tab === 'search') doSearch();
   loadTrending();
+  if (justConnected) {
+    // first connect, or more than 6 h since the last sync: refresh the song list
+    if (Date.now() - store.get('gdLastSync', 0) > 6 * 36e5) driveSync();
+    else toast('Google Drive connected');
+  }
+  // finish cover/name lookups that were interrupted last time
+  [...S.tracks.values()].forEach(t => enqueueLookup(t));
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn('sw', e));
 }
 init();
