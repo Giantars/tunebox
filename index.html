@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0b10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Tunebox">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="app.css">
+<title>Tunebox</title>
+</head>
+<body>
+<main id="view"></main>
+
+<div id="mini" class="mini hidden" data-act="open-np">
+  <div id="miniArt"></div>
+  <div class="meta"><div class="t" id="miniTitle"></div><div class="a" id="miniArtist"></div></div>
+  <button class="icon" data-act="toggle-play" id="miniPlay" data-icon="play"></button>
+  <button class="icon" data-act="next" data-icon="next"></button>
+  <div class="bar" id="miniBar"></div>
+</div>
+
+<nav class="tabs">
+  <button data-act="tab" data-tab="home"><span data-icon="home"></span>Home</button>
+  <button data-act="tab" data-tab="search"><span data-icon="search"></span>Search</button>
+  <button data-act="tab" data-tab="library"><span data-icon="library"></span>Library</button>
+  <button data-act="tab" data-tab="settings"><span data-icon="settings"></span>Settings</button>
+</nav>
+
+<section id="np" class="np">
+  <header class="np-top" id="npTop">
+    <button class="icon" data-act="close-np" data-icon="down"></button>
+    <span class="np-src" id="npSrc"></span>
+    <button class="icon" data-act="np-more" data-icon="more"></button>
+  </header>
+  <div class="np-body">
+    <div class="np-art-wrap" id="npArtWrap"><div id="npArt"></div><div id="ytBox" class="yt-box hidden"><div id="ytPlayer"></div></div></div>
+    <div class="np-queue hidden" id="npQueue"></div>
+    <div class="np-info">
+      <div class="meta"><div class="np-title t" id="npTitle"></div><div class="np-artist" id="npArtist"></div></div>
+      <button class="icon like" id="npLike" data-act="like-cur" data-icon="heart"></button>
+    </div>
+    <input id="seek" class="seek" type="range" min="0" max="1000" value="0" step="1">
+    <div class="times"><span id="tCur">0:00</span><span id="npStatus"></span><span id="tDur">0:00</span></div>
+    <div class="controls">
+      <button class="icon toggle" id="btnShuffle" data-act="shuffle" data-icon="shuffle"></button>
+      <button class="icon mid" data-act="prev" data-icon="prev"></button>
+      <button class="icon big" id="npPlay" data-act="toggle-play" data-icon="play"></button>
+      <button class="icon mid" data-act="next" data-icon="next"></button>
+      <button class="icon toggle" id="btnRepeat" data-act="repeat"><span data-icon="repeat"></span><span class="rep1">1</span></button>
+    </div>
+    <div class="np-bottom"><button class="pill" id="btnQueue" data-act="toggle-queue"><span data-icon="queue"></span>Up next</button></div>
+  </div>
+</section>
+
+<div id="sheet" class="sheet hidden"></div>
+<div id="toast" class="toast"></div>
+<audio id="audio" preload="auto" playsinline></audio>
+<input type="file" id="filepick" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg" multiple hidden>
+<script src="app.js"></script>
+</body>
+</html>
