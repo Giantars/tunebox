@@ -71,4 +71,33 @@
   });
   window.addEventListener('blur', reset);
   document.addEventListener('visibilitychange', () => { if (document.hidden) reset(); });
+  // Direction thresholds prevent the dock changing size for every scroll tick.
+  // Only scrollY and state are read; no page geometry or artwork is sampled.
+  let lastY = Math.max(0, window.scrollY), direction = 0, travel = 0, lockedUntil = 0;
+  document.addEventListener('dock-layout', e => {
+    if (e.detail.source !== 'scroll') {
+      lockedUntil = performance.now() + 800;
+      lastY = Math.max(0, window.scrollY); travel = 0;
+    }
+  });
+  window.addEventListener('scroll', () => {
+    const y = Math.max(0, window.scrollY), delta = y - lastY;
+    lastY = y;
+    if (y < 24) { travel = 0; setDockCompact(false, 'scroll'); return; }
+    const focus = document.activeElement;
+    if (!curTrack() || gesture || performance.now() < lockedUntil
+      || document.querySelector('#np.open') || /^(INPUT|TEXTAREA|SELECT)$/.test(focus?.tagName || '')
+      || (dock.contains(focus) && focus.matches(':focus-visible'))) { travel = 0; return; }
+    if (Math.abs(delta) < 1) return;
+    const nextDirection = Math.sign(delta);
+    if (nextDirection !== direction) { direction = nextDirection; travel = 0; }
+    travel += Math.abs(delta);
+    if (direction > 0 && y > 80 && travel >= 40) { setDockCompact(true, 'scroll'); travel = 0; }
+    else if (direction < 0 && travel >= 24) { setDockCompact(false, 'scroll'); travel = 0; }
+  }, { passive: true });
+  document.addEventListener('focusin', e => {
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) setDockCompact(false, 'focus');
+  });
+  window.addEventListener('resize', () => { setDockCompact(false, 'resize'); lastY = Math.max(0, window.scrollY); travel = 0; }, { passive: true });
+
 })();

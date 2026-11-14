@@ -294,3 +294,30 @@ body.has-player .dock-shade{height:calc(var(--safe-b) + 145px)}
 body.has-player .dock-shade{height:calc(var(--dock-bottom) + 140px)}
 .btn:disabled{opacity:.4;cursor:default}
 [data-lookup-status]{line-height:1.5}
+
+/* The same player folds into the compact navigation row during browsing. */
+.mini{transition:left .28s cubic-bezier(.2,.8,.2,1),right .28s cubic-bezier(.2,.8,.2,1),max-width .28s cubic-bezier(.2,.8,.2,1),transform .28s cubic-bezier(.2,.8,.2,1);contain:layout style}
+.mini-open{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:100%;text-align:left}
+.mini-open .t{display:block}.mini-open #miniArt{flex:none}
+.mini .icon{width:44px;height:44px}
+.mini,.compact-nav>button{touch-action:none}
+.mini [hidden]{display:none!important}
+.tabs{transition:opacity .2s,transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
+.compact-nav{position:fixed;left:16px;right:16px;bottom:var(--dock-bottom);max-width:580px;margin:0 auto;height:48px;z-index:20;display:flex;justify-content:space-between;pointer-events:none;opacity:0;visibility:hidden;transform:translateY(8px);transition:opacity .2s,transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s linear .2s}
+.compact-nav>button{width:48px;height:48px;display:grid;place-items:center;border-radius:50%;border:.5px solid #ffffff21;background:rgba(37,37,40,.55);backdrop-filter:blur(3px) saturate(1.12);-webkit-backdrop-filter:blur(3px) saturate(1.12);color:var(--tx)}
+.compact-nav .compact-current{color:var(--ac)}
+.compact-nav .ic{width:23px;height:23px}
+body.dock-compact .mini{left:72px;right:72px;max-width:468px;transform:translateY(70px)}
+body.dock-compact .tabs{opacity:0;visibility:hidden;transform:translateY(8px);pointer-events:none;transition:opacity .18s,transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s linear .2s}
+body.dock-compact .compact-nav{opacity:1;visibility:visible;transform:none;transition:opacity .2s,transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
+body.dock-compact .compact-nav>button{pointer-events:auto}
+body.has-player.dock-compact .dock-shade{height:calc(var(--dock-bottom) + 75px)}
+/* Blur actual artwork; no pixel readback or cross-origin canvas is needed. */
+.np{isolation:isolate;background:#202023}
+.np-background{position:absolute;inset:0;z-index:-1;overflow:hidden;pointer-events:none;background:linear-gradient(160deg,var(--npc,#232326),#161619)}
+.np-backdrop{position:absolute;left:-10%;top:-10%;width:120%;height:120%;object-fit:cover;filter:blur(40px) saturate(1.12) brightness(.65);opacity:0;transition:opacity .45s ease}
+.np-backdrop.visible{opacity:1}
+.np-shade{position:absolute;inset:0;background:linear-gradient(180deg,#11111112,#12121435 45%,#111114b8);pointer-events:none}
+@supports not (backdrop-filter:blur(1px)){.compact-nav>button{background:#29292d}}
+@media(prefers-reduced-transparency:reduce){.compact-nav>button{background:#29292d;backdrop-filter:none;-webkit-backdrop-filter:none}.np-backdrop{opacity:0!important}}
+@media(prefers-reduced-motion:reduce){.mini,.tabs,.compact-nav,.np-backdrop{transition:none!important}}

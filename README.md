@@ -56,9 +56,19 @@ The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a
 touch highlight and direct horizontal tab scrubbing. Pointer gestures activate
 once on release, tolerate small finger movements, and cancel when released outside
 the dock. Keyboard and assistive-technology clicks use the standard button.
-There is no canvas snapshot, texture upload, or JavaScript
-scroll handler: content stays in the browser's compositor during scrolling.
+While a track is selected, scrolling down folds the player and navigation into
+one row, with an expand-navigation button and Search on either side. Scrolling
+up or pressing the expand button restores the tabs. The same player and playback
+controls are reused. Hidden navigation controls are inert and excluded from the
+accessibility tree. A passive scroll handler reads scroll position and changes
+dock state at direction thresholds; it performs no layout reads or artwork draws.
 This approximates a glass finish; it does not implement Apple's native Liquid
 Glass refraction. Reduced transparency uses an opaque dock; reduced motion
 removes transitions. Keep `glass.js` in the service worker shell list and update
 all asset version parameters with each release.
+
+The full-screen player crossfades blurred copies of the current cover behind its
+controls. It uses the actual artwork, including asynchronously loaded offline
+covers, with a dark overlay for text contrast. Missing or failed artwork uses a
+neutral background. This requires no cross-origin canvas reads. Reduced motion
+removes the crossfade; reduced transparency keeps the neutral background.

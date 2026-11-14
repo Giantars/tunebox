@@ -773,7 +773,7 @@ async function loadArt(id) {
       artUrls.set(id, u);
       $$(`[data-tid="${CSS.escape(id)}"]`).forEach(el => swapArt(el, u));
       const c = curTrack();
-      if (c && c.id === id) updateMediaSession(c);
+      if (c && c.id === id) { updatePlayerBackdrop(c, u); updateMediaSession(c); }
     }
   } catch { /* ignore */ }
   artLoading.delete(id);
@@ -1465,7 +1465,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 16</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 17</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1510,6 +1510,8 @@ async function updateStorageInfo() {
 }
 
 function render() {
+  setDockCompact(false, 'view');
+  $('#compactTabIcon').innerHTML = icon(S.tab === 'library' ? 'library' : S.tab);
   $$('.tabs button').forEach((b, i) => {
     const selected = b.dataset.tab === S.tab;
     b.classList.toggle('on', selected);
@@ -1554,21 +1556,61 @@ function renderPlayState() {
   const playing = engPlaying();
   $('#miniPlay').innerHTML = icon(playing ? 'pause' : 'play');
   $('#npPlay').innerHTML = icon(playing ? 'pause' : 'play');
+  $('#miniPlay').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  $('#npPlay').setAttribute('aria-label', playing ? 'Pause' : 'Play');
   $('#np').classList.toggle('paused', !playing);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+}
+function setDockCompact(compact, source = 'manual') {
+  const next = !!compact && !!curTrack();
+  if (document.body.classList.contains('dock-compact') === next) return;
+  document.body.classList.toggle('dock-compact', next);
+  $('#mainTabs').inert = next;
+  $('#mainTabs').setAttribute('aria-hidden', String(next));
+  $('#compactNav').inert = !next;
+  $('#compactNav').setAttribute('aria-hidden', String(!next));
+  $('[data-act="dock-expand"]').setAttribute('aria-expanded', String(!next));
+  $('#miniNext').hidden = next;
+  document.dispatchEvent(new CustomEvent('dock-layout', { detail: { compact: next, source } }));
+}
+let backdropKey = '', backdropRequest = 0, backdropFront = 0;
+function updatePlayerBackdrop(track, source) {
+  const layers = [$('#npBackdropA'), $('#npBackdropB')];
+  if (!track || !source) {
+    backdropKey = ''; backdropRequest++;
+    layers.forEach(el => el.classList.remove('visible'));
+    return;
+  }
+  const key = track.id + '|' + source;
+  if (key === backdropKey) return;
+  backdropKey = key;
+  const request = ++backdropRequest;
+  const next = 1 - backdropFront, image = layers[next];
+  image.onload = () => {
+    if (request !== backdropRequest || curTrack()?.id !== track.id) return;
+    image.classList.add('visible');
+    layers[backdropFront].classList.remove('visible');
+    backdropFront = next;
+  };
+  image.onerror = () => {
+    if (request !== backdropRequest) return;
+    backdropKey = '';
+    layers.forEach(el => el.classList.remove('visible'));
+  };
+  image.src = source;
 }
 let lastArtId = null;
 function renderPlayer() {
   const t = curTrack();
   document.body.classList.toggle('has-player', !!t);
   $('#mini').classList.toggle('hidden', !t);
-  if (!t) return;
+  if (!t) { setDockCompact(false, 'player'); updatePlayerBackdrop(null, ''); return; }
+  updatePlayerBackdrop(t, artSrc(t));
   if (lastArtId !== t.id || !$('#npArt img, #npArt .ph')) {
     lastArtId = t.id;
     $('#miniArt').innerHTML = art(t, 'art');
     $('#npArt').innerHTML = art(t, 'np-art');
-    $('#np').style.setProperty('--npc', `hsl(${hue(t.id)} 12% 17%)`);
-    document.documentElement.style.setProperty('--ambient-h', hue(t.id));
+    $('#np').style.setProperty('--npc', '#232326');
     const isYT = t.source === 'youtube';
     $('#npArt').classList.toggle('hidden', isYT);
     $('#ytBox').classList.toggle('hidden', !isYT);
@@ -1582,6 +1624,7 @@ function renderPlayer() {
     }
   }
   $('#miniTitle').textContent = t.title;
+  $('.mini-open').setAttribute('aria-label', `Open player: ${t.title} by ${t.artist}`);
   $('#miniArtist').textContent = t.artist;
   $('#npTitle').textContent = t.title;
   $('#npArtist').textContent = t.artist;
@@ -1730,6 +1773,7 @@ const actions = {
   'q-play': el => playIndex(+el.dataset.i),
   more: el => trackMenu((S.lists[el.dataset.list] || [])[+el.dataset.i], { list: el.dataset.list, i: +el.dataset.i }),
   'open-np': () => openNP(),
+  'dock-expand': () => setDockCompact(false),
   'close-np': () => closeNP(),
   'toggle-play': () => togglePlay(),
   next: () => next(),

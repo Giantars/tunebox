@@ -11,30 +11,37 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="app.css?v=16">
+<link rel="stylesheet" href="app.css?v=17">
 <title>Tunebox</title>
 </head>
 <body>
 <main id="view"></main>
 
 <div id="mini" class="mini hidden" data-act="open-np">
-  <div id="miniArt"></div>
-  <div class="meta"><div class="t" id="miniTitle"></div><div class="a" id="miniArtist"></div></div>
-  <button class="icon" data-act="toggle-play" id="miniPlay" data-icon="play"></button>
-  <button class="icon" data-act="next" data-icon="next"></button>
+  <button class="mini-open" data-act="open-np" aria-label="Open Now Playing">
+    <span id="miniArt"></span>
+    <span class="meta"><span class="t" id="miniTitle"></span><span class="a" id="miniArtist"></span></span>
+  </button>
+  <button class="icon" data-act="toggle-play" id="miniPlay" data-icon="play" aria-label="Play"></button>
+  <button class="icon" data-act="next" id="miniNext" data-icon="next" aria-label="Next song"></button>
   <div class="bar" id="miniBar"></div>
 </div>
 
 <div class="dock-shade" aria-hidden="true"></div>
-<nav class="tabs" aria-label="Main navigation">
+<nav class="tabs" id="mainTabs" aria-label="Main navigation">
   <span class="tab-lens" aria-hidden="true"></span>
   <button data-act="tab" data-tab="home"><span data-icon="home"></span>Home</button>
   <button data-act="tab" data-tab="search"><span data-icon="search"></span>Search</button>
   <button data-act="tab" data-tab="library"><span data-icon="library"></span>Library</button>
   <button data-act="tab" data-tab="settings"><span data-icon="settings"></span>Settings</button>
 </nav>
+<div class="compact-nav" id="compactNav" aria-hidden="true" inert>
+  <button class="compact-current" data-act="dock-expand" aria-label="Show navigation" aria-controls="mainTabs" aria-expanded="false"><span id="compactTabIcon" data-icon="home"></span></button>
+  <button class="compact-search" data-act="tab" data-tab="search" data-icon="search" aria-label="Search"></button>
+</div>
 
 <section id="np" class="np">
+  <div class="np-background" aria-hidden="true"><img class="np-backdrop" id="npBackdropA" alt="" decoding="async"><img class="np-backdrop" id="npBackdropB" alt="" decoding="async"><div class="np-shade"></div></div>
   <header class="np-top" id="npTop">
     <button class="icon" data-act="close-np" data-icon="down"></button>
     <span class="np-src" id="npSrc"></span>
@@ -64,7 +71,7 @@
 <div id="toast" class="toast"></div>
 <audio id="audio" preload="auto" playsinline></audio>
 <input type="file" id="filepick" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg" multiple hidden>
-<script src="app.js?v=16"></script>
-<script src="glass.js?v=16"></script>
+<script src="app.js?v=17"></script>
+<script src="glass.js?v=17"></script>
 </body>
 </html>
