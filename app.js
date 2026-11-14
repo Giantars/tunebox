@@ -1081,6 +1081,7 @@ async function addToPlaylist(p, t) {
 
 /* ---------------- UI: icons ---------------- */
 const ICONS = {
+  music: ['s', '<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>'],
   home: ['f', '<path d="M12 3 3 10.2V21h6.5v-6h5v6H21V10.2z"/>'],
   search: ['s', '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>'],
   library: ['f', '<path d="M4 4h3.2v16H4zM9.6 4h3.2v16H9.6zM15 5.1l3.1-.8 3.9 15-3.1.8z"/>'],
@@ -1132,7 +1133,14 @@ function viewHome() {
   const recent = all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 15);
   S.lists.recentH = recent;
   const nOff = all.filter(t => S.cached.has(t.id)).length;
-  let h = `<h1>${greet}<span class="offline-pill">Offline</span></h1>`;
+  const mine = all.filter(t => t.source === 'local' || t.source === 'drive');
+  const featured = recent[0] || mine[mine.length - 1];
+  S.lists.homeMusic = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 10);
+  if (featured) S.lists.homeFeatured = [featured];
+  let h = `<div class="home-heading"><div><div class="eyebrow">${greet}</div><h1>Listen now<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></div>`;
+  h += featured
+    ? `<button class="feature" data-act="play" data-list="homeFeatured" data-i="0">${art(featured, 'feature-art')}<span class="feature-shade"></span><span class="feature-copy"><span class="eyebrow">YOUR NEXT LISTEN</span><span class="feature-title">${esc(featured.title)}</span><span class="feature-artist">${esc(featured.artist)}</span></span><span class="feature-play">${icon('play')}</span></button>`
+    : `<div class="welcome-card"><div class="welcome-note">${icon('music')}</div><div class="eyebrow">YOUR MUSIC. EVERYWHERE.</div><h2>A little closer to<br>your favorite songs.</h2><p>Bring your music along. Connect Google Drive or add files to start listening.</p><button class="btn primary inline" data-act="tab" data-tab="settings">Connect your music ${icon('plus')}</button><button class="welcome-import" data-act="import">Add music files</button></div>`;
   if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
     h += `<div class="banner"><div><b>Install Tunebox:</b> tap the Share button in Safari, then <b>Add to Home Screen</b>. It then opens full-screen like a normal app and keeps your saved songs.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
   }
@@ -1145,6 +1153,9 @@ function viewHome() {
     <button data-act="tab" data-tab="search">${icon('search')}Find music</button></div>`;
   if (recent.length) {
     h += `<h2>Recently played</h2><div class="cards">${recent.map((t, i) => `<div class="card" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>`).join('')}</div>`;
+  }
+  if (S.lists.homeMusic.length) {
+    h += `<h2>Recently added <button class="section-link" data-act="tab" data-tab="library">See all</button></h2><div class="cards">${S.lists.homeMusic.map((t, i) => `<button class="card" data-act="play" data-list="homeMusic" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></button>`).join('')}</div>`;
   }
   h += `<h2>Trending on Audius</h2>`;
   if (S.trending.length) h += rows('trending', S.trending.map(canon));
