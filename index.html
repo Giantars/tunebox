@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#101012" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#0c0a13">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -12,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="app.css?v=7">
+<link rel="stylesheet" href="app.css?v=8">
 <title>Tunebox</title>
 </head>
 <body>
@@ -27,6 +26,7 @@
 </div>
 
 <nav class="tabs" aria-label="Main navigation">
+  <span class="tab-lens" aria-hidden="true"></span>
   <button data-act="tab" data-tab="home"><span data-icon="home"></span>Home</button>
   <button data-act="tab" data-tab="search"><span data-icon="search"></span>Search</button>
   <button data-act="tab" data-tab="library"><span data-icon="library"></span>Library</button>
@@ -63,6 +63,6 @@
 <div id="toast" class="toast"></div>
 <audio id="audio" preload="auto" playsinline></audio>
 <input type="file" id="filepick" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg" multiple hidden>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

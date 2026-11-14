@@ -1137,20 +1137,21 @@ function viewHome() {
   const featured = recent[0] || mine[mine.length - 1];
   S.lists.homeMusic = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 10);
   if (featured) S.lists.homeFeatured = [featured];
-  let h = `<div class="home-heading"><div><div class="eyebrow">${greet}</div><h1>Listen now<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></div>`;
+  document.documentElement.style.setProperty('--ambient-h', featured ? hue(featured.id) : 325);
+  let h = `<div class="home-heading"><div><div class="brand-line">${icon('music')} TUNEBOX <span class="brand-dot"></span></div><div class="greeting">${greet}</div></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></div><div class="home-title"><h1>Your daily<br><span>sound escape.</span></h1><span class="offline-pill">Offline</span></div>`;
   h += featured
-    ? `<button class="feature" data-act="play" data-list="homeFeatured" data-i="0">${art(featured, 'feature-art')}<span class="feature-shade"></span><span class="feature-copy"><span class="eyebrow">YOUR NEXT LISTEN</span><span class="feature-title">${esc(featured.title)}</span><span class="feature-artist">${esc(featured.artist)}</span></span><span class="feature-play">${icon('play')}</span></button>`
-    : `<div class="welcome-card"><div class="welcome-note">${icon('music')}</div><div class="eyebrow">YOUR MUSIC. EVERYWHERE.</div><h2>A little closer to<br>your favorite songs.</h2><p>Bring your music along. Connect Google Drive or add files to start listening.</p><button class="btn primary inline" data-act="tab" data-tab="settings">Connect your music ${icon('plus')}</button><button class="welcome-import" data-act="import">Add music files</button></div>`;
+    ? `<button class="feature" data-act="play" data-list="homeFeatured" data-i="0"><span class="feature-top"><span class="glass-tag">${icon('music')} IN YOUR ROTATION</span><span class="feature-arrow">↗</span></span><span class="feature-cover">${art(featured, 'feature-art')}</span><span class="feature-copy"><span class="eyebrow">PICK UP WHERE YOU LEFT OFF</span><span class="feature-title">${esc(featured.title)}</span><span class="feature-artist">${esc(featured.artist)}</span></span><span class="feature-play">${icon('play')}</span></button>`
+    : `<div class="welcome-card"><span class="glass-tag">${icon('cloud')} YOUR PERSONAL COLLECTION</span><div class="sound-sculpture" aria-hidden="true"><div class="sculpture-ring ring-one"></div><div class="sculpture-ring ring-two"></div><div class="sculpture-tile">${icon('music')}</div><span class="sculpture-spark">✦</span></div><div class="welcome-copy"><h2>All your music.<br>In your own space.</h2><p>Connect your Drive and let your collection take the stage.</p><div class="welcome-actions"><button class="btn primary inline" data-act="tab" data-tab="settings">Connect Drive ${icon('plus')}</button><button class="welcome-import" data-act="import" aria-label="Add music files">${icon('folder')}</button></div></div></div>`;
   if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
     h += `<div class="banner"><div><b>Install Tunebox:</b> tap the Share button in Safari, then <b>Add to Home Screen</b>. It then opens full-screen like a normal app and keeps your saved songs.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
   }
   h += `<div class="quick">
-    <button data-act="open" data-type="liked">${icon('heartOn')}Liked</button>
-    <button data-act="open" data-type="offline">${icon('download')}Downloaded <span class="small">${nOff}</span></button>
+    <button data-act="open" data-type="liked"><span class="quick-icon">${icon('heartOn')}</span><span>Favorites<small>Your best finds</small></span>${icon('back')}</button>
+    <button data-act="open" data-type="offline"><span class="quick-icon">${icon('download')}</span><span>Offline<small>${nOff} saved songs</small></span>${icon('back')}</button>
     ${settings.gClientId
-    ? `<button data-act="open" data-type="drive">${icon('cloud')}My music</button>`
-    : `<button data-act="open" data-type="local">${icon('folder')}My files</button>`}
-    <button data-act="tab" data-tab="search">${icon('search')}Find music</button></div>`;
+    ? `<button data-act="open" data-type="drive"><span class="quick-icon">${icon('cloud')}</span><span>Cloud library<small>Your collection</small></span>${icon('back')}</button>`
+    : `<button data-act="open" data-type="local"><span class="quick-icon">${icon('folder')}</span><span>On this device<small>Your collection</small></span>${icon('back')}</button>`}
+    <button data-act="tab" data-tab="search"><span class="quick-icon">${icon('search')}</span><span>Discover<small>Find a new favorite</small></span>${icon('back')}</button></div>`;
   if (recent.length) {
     h += `<h2>Recently played</h2><div class="cards">${recent.map((t, i) => `<div class="card" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>`).join('')}</div>`;
   }
@@ -1280,7 +1281,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 7</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 8</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
@@ -1325,7 +1326,12 @@ async function updateStorageInfo() {
 }
 
 function render() {
-  $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  $$('.tabs button').forEach((b, i) => {
+    const selected = b.dataset.tab === S.tab;
+    b.classList.toggle('on', selected);
+    if (selected) { b.setAttribute('aria-current', 'page'); $('.tabs').style.setProperty('--tab-index', i); }
+    else b.removeAttribute('aria-current');
+  });
   S.lists = { queue: S.queue, recentH: S.lists.recentH || [] };
   const v = $('#view');
   let h;
@@ -1377,6 +1383,7 @@ function renderPlayer() {
     $('#miniArt').innerHTML = art(t, 'art');
     $('#npArt').innerHTML = art(t, 'np-art');
     $('#np').style.setProperty('--npc', `hsl(${hue(t.id)} 35% 22%)`);
+    document.documentElement.style.setProperty('--ambient-h', hue(t.id));
     const isYT = t.source === 'youtube';
     $('#npArt').classList.toggle('hidden', isYT);
     $('#ytBox').classList.toggle('hidden', !isYT);
