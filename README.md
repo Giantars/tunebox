@@ -2,8 +2,8 @@
 
 Personal music player PWA for iPhone. Plain HTML/CSS/JS, no build step.
 
-- **Sources:** Audius (free API, no key), Jamendo (free Client ID from devportal.jamendo.com, entered in Settings), your own audio files.
-- **Offline:** every song you play is saved to the phone (IndexedDB) automatically; next play is local. The next song in the queue is pre-saved too.
+- **Sources:** YouTube through its official video player, Google Drive and your own audio files. Search offers YouTube and Library only.
+- **Offline:** your Drive songs are saved to the phone (IndexedDB) automatically; next play is local. The next song in the queue is pre-saved too. YouTube uses its online video player.
 - **Stall recovery:** a stream stuck buffering for 12 s, or one that errors, is reconnected at the same position (2 tries), then skipped.
 - Lock-screen controls (Media Session), queue, shuffle, repeat, likes, playlists, ID3 tag + cover reading for MP3s.
 
@@ -60,6 +60,17 @@ only on the player header or artwork, not its buttons or seek/queue controls.
 clicks and leaves drag scrolling native. Dialogs support focus containment and
 Escape dismissal.
 
+Version 24 puts the page scroller, dock and dialogs inside one visual-viewport
+frame. `viewport.js` follows Safari viewport resize/offset changes. All tabs use
+the same 8 px dock inset and 4 px gap below the mini player. Player backgrounds
+cover the full frame; bottom sheets are flush with its bottom edge, with safe-area
+padding inside. Artwork fits the remaining player space without stretching.
+Toolbar touches during scrolling activate on the initial press, including a
+pointer-event fallback, and do not repeat on release. Resizing no longer changes
+dock mode. Navigation replaces the old scroll surface so its deceleration cannot
+move a newly opened page. Audius and Jamendo UI, search calls and home requests
+are removed. Saved files, playlists and cached audio are preserved.
+
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.
@@ -98,8 +109,9 @@ information may remain unmatched.
 
 The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a
 touch highlight and direct horizontal tab scrubbing. Pointer gestures activate
-once on release, tolerate small finger movements, and cancel when released outside
-the dock. Keyboard and assistive-technology clicks use the standard button.
+once on release when idle, tolerate small finger movements, and cancel when
+released outside the dock. During scrolling, touch presses activate immediately.
+Keyboard and assistive-technology clicks use the standard button.
 Touch controls cancel native momentum scrolling and handle release directly,
 including when the browser suppresses its normal click. This applies to the
 compact player and side buttons as well as the full tab bar. The tab lens

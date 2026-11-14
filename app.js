@@ -1,16 +1,29 @@
 'use strict';
 /* Tunebox — personal music player PWA.
-   Sources: Audius (free API), Jamendo (free API, needs client_id), your own files.
-   Every song played is auto-saved to IndexedDB so the next play is offline and stutter-free. */
+   Sources: YouTube (official player), Google Drive and your own files.
+   Own music is auto-saved to IndexedDB; YouTube uses its online video player. */
 
-const APP_NAME = 'tunebox_personal_player';
-const AUDIUS = 'https://api.audius.co/v1';
-const JAMENDO = 'https://api.jamendo.com/v3.0';
 const MAX_SAVE_BYTES = 80 * 1024 * 1024;
 // Public browser OAuth client; no client secret belongs in this app.
 const GOOGLE_CLIENT_ID = '333776787164-f32a3sslenqrhrj9fiirscaab02db2ol.apps.googleusercontent.com';
 
 const $ = (s, r = document) => r.querySelector(s);
+let pageScroll = document.querySelector('#pageScroll');
+function scrollPageTo(left, top) {
+  const options = typeof left === 'object' ? { behavior: 'instant', ...left } : { left, top, behavior: 'instant' };
+  pageScroll.scrollTo(options);
+}
+function stopPageMotion() {
+  scrollPageTo(0, pageScroll.scrollTop);
+}
+function resetPageScroll() {
+  // A new page gets a new scroll surface. Native deceleration on the previous
+  // surface cannot carry over and move the next page after its first frame.
+  const next = pageScroll.cloneNode(false);
+  next.appendChild(document.querySelector('#view'));
+  pageScroll.replaceWith(next);
+  pageScroll = next;
+}
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = s => {
@@ -80,9 +93,8 @@ const S = {
   shuffle: store.get('shuffle', false),
   repeat: store.get('repeat', 'off'),   // off | all | one
   tab: 'home', sub: null,
-  source: store.get('source', 'audius'),
+  source: ['youtube', 'mine'].includes(store.get('source', 'mine')) ? store.get('source', 'mine') : 'mine',
   q: '', results: [], searching: false, searchErr: '',
-  trending: store.get('trending', []),
   lists: {},
   showQueue: false,
   restorePos: 0,
@@ -97,7 +109,6 @@ if (store.get('gClientId', '') !== GOOGLE_CLIENT_ID) {
 const APPEARANCES = ['dark', 'forest', 'meteor', 'zoro', 'sophie'];
 const WALLPAPERS = { zoro: 'assets/zoro-official.webp', sophie: 'assets/sophie-stars.webp' };
 const settings = {
-  jamendoId: store.get('jamendoId', ''),
   autoSave: store.get('autoSave', true),
   ytKey: store.get('ytKey', ''),
   gClientId: GOOGLE_CLIENT_ID,
@@ -128,26 +139,7 @@ async function saveTrack(t) {
 }
 
 /* ---------------- Sources ---------------- */
-function fromAudius(t) {
-  const aw = t.artwork || {};
-  return {
-    id: 'au:' + t.id, source: 'audius', rid: t.id,
-    title: t.title || 'Untitled', artist: (t.user && t.user.name) || 'Unknown artist', album: '',
-    duration: t.duration || 0, art: aw['480x480'] || aw['1000x1000'] || aw['150x150'] || '',
-  };
-}
-function fromJamendo(t) {
-  return {
-    id: 'ja:' + t.id, source: 'jamendo', rid: t.id,
-    title: t.name || 'Untitled', artist: t.artist_name || 'Unknown artist', album: t.album_name || '',
-    duration: t.duration || 0, art: t.image || t.album_image || '', audio: t.audio,
-  };
-}
-function streamUrl(t) {
-  if (t.source === 'audius') return `${AUDIUS}/tracks/${encodeURIComponent(t.rid)}/stream?app_name=${APP_NAME}`;
-  if (t.source === 'jamendo') return t.audio;
-  return '';
-}
+function streamUrl(t) { return t.audio || ''; }
 async function fetchJSON(url, ms = 15000) {
   const ac = new AbortController();
   const tm = setTimeout(() => ac.abort(), ms);
@@ -168,19 +160,6 @@ async function fetchJSON(url, ms = 15000) {
   } catch (e) {
     throw e.name === 'AbortError' ? new Error('timed out') : e;
   } finally { clearTimeout(tm); }
-}
-async function searchAudius(q) {
-  const u = q ? `${AUDIUS}/tracks/search?query=${encodeURIComponent(q)}&limit=40&app_name=${APP_NAME}`
-              : `${AUDIUS}/tracks/trending?limit=40&app_name=${APP_NAME}`;
-  const j = await fetchJSON(u);
-  return (j.data || []).filter(t => t.is_streamable !== false && !t.is_stream_gated && !t.is_delete).map(fromAudius);
-}
-async function searchJamendo(q) {
-  const p = new URLSearchParams({ client_id: settings.jamendoId, format: 'json', limit: '40', audioformat: 'mp32', imagesize: '300' });
-  if (q) p.set('search', q); else p.set('order', 'popularity_week');
-  const j = await fetchJSON(`${JAMENDO}/tracks/?${p}`);
-  if (j.headers && j.headers.status !== 'success') throw new Error(j.headers.error_message || 'Jamendo error');
-  return (j.results || []).filter(t => t.audio).map(fromJamendo);
 }
 /* YouTube: official Data API for search + official IFrame player for playback (video stays visible). */
 const YTAPI = 'https://www.googleapis.com/youtube/v3';
@@ -301,16 +280,6 @@ function engPause() { if (curIsYT()) ytStop(); else audio.pause(); }
 function engTime() { return curIsYT() ? (yt && yt.getCurrentTime ? yt.getCurrentTime() || 0 : 0) : audio.currentTime; }
 function engSeek(s) { if (curIsYT()) { if (yt && yt.seekTo) yt.seekTo(s, true); } else audio.currentTime = s; }
 
-async function loadTrending() {
-  if (!navigator.onLine) return;
-  try {
-    const r = await searchAudius('');
-    S.trending = r.slice(0, 25);
-    store.set('trending', S.trending);
-    if (S.tab === 'home') render();
-  } catch (e) { console.warn('trending', e); }
-}
-
 /* ---------------- Offline cache ---------------- */
 const dlQueue = [];
 let dlBusy = false;
@@ -340,7 +309,9 @@ async function pumpDl() {
 }
 function fetchAudio(t, signal) {
   if (t.source === 'drive') return gdFetch(`${GDAPI}/files/${encodeURIComponent(t.rid)}?alt=media`, { signal });
-  return fetch(streamUrl(t), { signal });
+  const url = streamUrl(t);
+  if (!url) return Promise.reject(new Error('This song is not available from the current music sources.'));
+  return fetch(url, { signal });
 }
 // Download a song. Returns its Blob; stores it on the phone when doStore. Parallel calls share one download.
 const inflight = new Map();
@@ -828,7 +799,9 @@ function prioritizeVisibleCovers() {
 }
 function observeVisibleCovers() {
   if (!('IntersectionObserver' in window)) return;
-  if (!coverObserver) coverObserver = new IntersectionObserver(entries => {
+  if (coverObserver?.root !== pageScroll) {
+    coverObserver?.disconnect();
+    coverObserver = new IntersectionObserver(entries => {
     for (const entry of entries) {
       const id = entry.target.querySelector('[data-tid]')?.dataset.tid;
       if (entry.isIntersecting && id) observedCovers.set(entry.target, id);
@@ -836,7 +809,8 @@ function observeVisibleCovers() {
     }
     visibleCoverIds.clear(); observedCovers.forEach(id => visibleCoverIds.add(id));
     prioritizeVisibleCovers();
-  }, { rootMargin: '160px 0px' });
+    }, { root: pageScroll, rootMargin: '160px 0px' });
+  }
   coverObserver.disconnect(); observedCovers.clear(); visibleCoverIds.clear();
   $$('#view .row, #view .card, #view .recent-tile').forEach(el => coverObserver.observe(el));
 }
@@ -1232,7 +1206,6 @@ function dur() {
 window.addEventListener('online', () => {
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
-  if (!S.trending.length) loadTrending();
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
   pumpLookup(); pumpArtworkSaves();
   if (S.tab === 'home') render();
@@ -1492,10 +1465,6 @@ function viewHome() {
       return `<button class="card playlist-card" data-act="open" data-type="pl" data-id="${esc(p.id)}">${t ? art(t, 'card-art') : `<span class="card-art playlist-placeholder">${icon('list')}</span>`}<span class="t">${esc(p.name)}</span><span class="a">${p.ids.length} songs</span></button>`;
     }).join('')}</div>`;
   }
-  if (S.trending.length) {
-    h += `<h2>On Audius<button class="section-link" data-act="tab" data-tab="search">Explore</button></h2><div class="cards">${S.trending.slice(0, 8).map(canon).map((t, i) => coverCard(t, i, 'homeTrending')).join('')}</div>`;
-    S.lists.homeTrending = S.trending.slice(0, 8).map(canon);
-  }
   if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
     h += `<div class="banner"><div>For full-screen listening, use Safari's Share menu and choose <b>Add to Home Screen</b>.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
   }
@@ -1505,9 +1474,7 @@ function viewHome() {
 function viewSearch() {
   return `<h1>Search<span class="offline-pill">Offline</span></h1>
     <div class="seg">
-      <button data-act="src" data-src="audius" class="${S.source === 'audius' ? 'on' : ''}">Audius</button>
       <button data-act="src" data-src="youtube" class="${S.source === 'youtube' ? 'on' : ''}">YouTube</button>
-      <button data-act="src" data-src="jamendo" class="${S.source === 'jamendo' ? 'on' : ''}">Jamendo</button>
       <button data-act="src" data-src="mine" class="${S.source === 'mine' ? 'on' : ''}">Library</button>
     </div>
     <form id="searchForm" autocomplete="off"><input id="q" class="searchbox" type="search" enterkeyhint="search" placeholder="${S.source === 'mine' ? 'Search your saved songs' : 'Songs, artists'}" value="${esc(S.q)}"></form>
@@ -1517,15 +1484,13 @@ function renderResults() {
   const el = $('#results');
   if (!el) return;
   let h = '';
-  if (S.source === 'jamendo' && !settings.jamendoId) {
-    h = `<div class="msg"><b>Jamendo needs a free key</b><br><br>1. Go to <a href="https://devportal.jamendo.com" target="_blank" rel="noopener">devportal.jamendo.com</a> and sign up<br>2. Create an app (any name)<br>3. Copy the <b>Client ID</b> into Settings</div>`;
-  } else if (S.source === 'youtube' && !settings.ytKey) {
+  if (S.source === 'youtube' && !settings.ytKey) {
     h = `<div class="msg"><b>YouTube needs a free key</b><br><br>1. Open <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a><br>2. New project, then enable <b>YouTube Data API v3</b><br>3. Credentials, then <b>Create credentials</b>, then <b>API key</b><br>4. Paste it in Settings</div>`;
   } else if (S.searching && !S.results.length) h = '<div class="msg">Searching…</div>';
   else if (S.searchErr) h = `<div class="msg">${esc(S.searchErr)}</div>`;
   else if (!S.results.length) h = `<div class="msg">${S.q ? 'No results' : S.source === 'mine' ? 'Songs you play, like or add show up here.' : ''}</div>`;
   else {
-    const label = S.q ? '' : { audius: '<h2>Trending now</h2>', jamendo: '<h2>Popular this week</h2>', youtube: '<h2>Top music videos</h2>' }[S.source] || '';
+    const label = S.q ? '' : { youtube: '<h2>Top music videos</h2>' }[S.source] || '';
     const note = S.source === 'youtube' ? '<div class="small" style="margin:4px 0 8px">YouTube songs play with the player open and the screen on. They are skipped when the phone is locked.</div>' : '';
     h = label + note + rows('search', S.results.map(canon));
   }
@@ -1537,6 +1502,7 @@ async function doSearch() {
   const q = S.q.trim(), tok = ++sTok;
   S.searchErr = '';
   if (S.source === 'mine') {
+    S.searching = false;
     const ql = q.toLowerCase();
     S.results = [...S.tracks.values()]
       .filter(t => !ql || (t.title + ' ' + t.artist + ' ' + (t.album || '')).toLowerCase().includes(ql))
@@ -1544,13 +1510,13 @@ async function doSearch() {
     renderResults();
     return;
   }
-  if ((S.source === 'jamendo' && !settings.jamendoId) || (S.source === 'youtube' && !settings.ytKey)) { S.results = []; renderResults(); return; }
-  if (!navigator.onLine) { S.results = []; S.searchErr = "You're offline. Switch to Library to play saved songs."; renderResults(); return; }
+  if (S.source === 'youtube' && !settings.ytKey) { S.searching = false; S.results = []; renderResults(); return; }
+  if (!navigator.onLine) { S.searching = false; S.results = []; S.searchErr = "You're offline. Switch to Library to play saved songs."; renderResults(); return; }
   S.searching = true;
   S.results = [];
   renderResults();
   try {
-    const r = S.source === 'audius' ? await searchAudius(q) : S.source === 'youtube' ? await searchYouTube(q) : await searchJamendo(q);
+    const r = await searchYouTube(q);
     if (tok !== sTok) return;
     S.results = r;
   } catch (e) {
@@ -1621,7 +1587,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 23</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 24</p>
   <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
     <button class="appearance-option" data-act="appearance" data-theme="zoro" aria-pressed="${settings.appearance === 'zoro'}"><span class="appearance-swatch zoro-swatch" aria-hidden="true"></span><span>Zoro · Asura<small>Official character art</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="sophie" aria-pressed="${settings.appearance === 'sophie'}"><span class="appearance-swatch sophie-swatch" aria-hidden="true"></span><span>Sophie · Stars<small>Howl's Moving Castle</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
@@ -1642,14 +1608,10 @@ function viewSettings() {
     <div class="small">Free, no card needed. At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>: create a project, enable <b>YouTube Data API v3</b>, then Credentials, Create credentials, API key. About 100 new searches a day; repeat searches are remembered and cost nothing.</div>
     <input id="ytKey" class="field" placeholder="AIza…" value="${esc(settings.ytKey)}" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="btn inline" data-act="save-yt">Save key</button></div>
-  <div class="group"><div class="set-head">Jamendo key</div>
-    <div class="small">Free. Sign up at <a href="https://devportal.jamendo.com" target="_blank" rel="noopener">devportal.jamendo.com</a>, create an app, paste its Client ID here.</div>
-    <input id="jamId" class="field" placeholder="Client ID" value="${esc(settings.jamendoId)}" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <button class="btn inline" data-act="save-jam">Save key</button></div>
   <div class="group"><div class="set-head">Storage</div><div id="storageInfo" class="small">Calculating…</div>
     <div class="list-head" style="margin-top:12px"><button class="btn danger" data-act="clear-dl">Remove all downloads</button></div>
     <div class="small">Your own files and playlists are kept.</div></div>
-  <div class="group small">Tunebox plays free, artist-uploaded music from <b>Audius</b> and <b>Jamendo</b>, plus music files you own. Lock-screen controls and background play work once it's added to your Home Screen.</div>`;
+  <div class="group small">Tunebox plays your music from Google Drive and this device, plus YouTube through its video player. Your saved music supports offline and lock-screen playback.</div>`;
 }
 async function updateStorageInfo() {
   const el = $('#storageInfo');
@@ -1796,7 +1758,7 @@ function renderPlayer() {
   $('#miniArtist').textContent = t.artist;
   $('#npTitle').textContent = t.title;
   $('#npArtist').textContent = t.artist;
-  const src = { local: 'My files', drive: 'Google Drive', audius: 'Audius', jamendo: 'Jamendo', youtube: 'YouTube' }[t.source] || '';
+  const src = { local: 'My files', drive: 'Google Drive', youtube: 'YouTube' }[t.source] || '';
   $('#npSrc').textContent = src + (S.cached.has(t.id) && t.source !== 'local' ? ' · saved' : S.downloading.has(t.id) ? ' · saving…' : '');
   const liked = !!canon(t).liked;
   const lk = $('#npLike');
@@ -1833,13 +1795,12 @@ function syncOverlayState() {
   const playerOpen = $('#np').classList.contains('open'), sheetOpen = !$('#sheet').classList.contains('hidden');
   const open = playerOpen || sheetOpen, compact = document.body.classList.contains('dock-compact');
   if (open && overlayScroll === null) {
-    overlayScroll = window.scrollY;
-    document.body.style.top = `-${overlayScroll}px`;
+    overlayScroll = pageScroll.scrollTop;
     document.body.classList.add('overlay-open');
   } else if (!open && overlayScroll !== null) {
     const position = overlayScroll; overlayScroll = null;
-    document.body.classList.remove('overlay-open'); document.body.style.top = '';
-    window.scrollTo(0, position);
+    document.body.classList.remove('overlay-open');
+    scrollPageTo(0, position);
   }
   $('#view').inert = open;
   $('#mini').inert = open;
@@ -1850,6 +1811,8 @@ function syncOverlayState() {
   $('#np').inert = !playerOpen || sheetOpen;
   $('#np').setAttribute('aria-hidden', String(!playerOpen || sheetOpen));
   document.body.classList.toggle('sheet-open', sheetOpen);
+  document.documentElement.classList.toggle('player-open', playerOpen);
+  $('meta[name="theme-color"]').content = playerOpen ? '#202023' : { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[settings.appearance] || '#101012';
 }
 function openNP() {
   playerReturnFocus = document.activeElement;
@@ -1984,8 +1947,9 @@ const actions = {
     $(`[data-act="appearance"][data-theme="${settings.appearance}"]`)?.focus({ preventScroll: true });
   },
   tab: el => {
-    S.tab = el.dataset.tab; S.sub = null; render(); window.scrollTo(0, 0);
+    resetPageScroll(); S.tab = el.dataset.tab; S.sub = null; render();
     if (S.tab === 'search' && !S.results.length && !S.searching) doSearch();
+    scrollPageTo(0, 0);
   },
   play: el => playList(S.lists[el.dataset.list], +el.dataset.i),
   'q-play': el => playIndex(+el.dataset.i),
@@ -2001,9 +1965,9 @@ const actions = {
   'like-cur': () => toggleLike(curTrack()),
   'np-more': () => trackMenu(curTrack(), {}),
   'toggle-queue': () => { S.showQueue = !S.showQueue; renderQueue(); },
-  src: el => { S.source = el.dataset.src; store.set('source', S.source); S.results = []; render(); doSearch(); },
-  open: el => { S.tab = 'library'; S.sub = { type: el.dataset.type, id: el.dataset.id }; render(); window.scrollTo(0, 0); },
-  back: () => { S.sub = null; render(); },
+  src: el => { resetPageScroll(); S.source = el.dataset.src === 'youtube' ? 'youtube' : 'mine'; store.set('source', S.source); S.results = []; render(); doSearch(); },
+  open: el => { resetPageScroll(); S.tab = 'library'; S.sub = { type: el.dataset.type, id: el.dataset.id }; render(); scrollPageTo(0, 0); },
+  back: () => { resetPageScroll(); S.sub = null; render(); },
   'play-all': el => { const a = S.lists[el.dataset.list]; if (a && a.length) { if (S.shuffle) toggleShuffle(); playList(a, 0); } },
   'shuffle-all': el => {
     const a = S.lists[el.dataset.list];
@@ -2017,11 +1981,6 @@ const actions = {
   sheet: el => { const f = sheetFns[+el.dataset.k]; closeSheet(); if (f) f(); },
   'sheet-close': () => closeSheet(),
   'hide-install': () => { store.set('hideInstall', true); render(); },
-  'save-jam': () => {
-    settings.jamendoId = ($('#jamId').value || '').trim();
-    store.set('jamendoId', settings.jamendoId);
-    toast(settings.jamendoId ? 'Jamendo key saved' : 'Jamendo key cleared');
-  },
   'retry-lookup': () => {
     if (!settings.lookup) return;
     lookupError = false;
@@ -2120,7 +2079,6 @@ async function init() {
   render();
   renderPlayer();
   if (S.tab === 'search') doSearch();
-  loadTrending();
   if (justConnected) {
     // first connect, or more than 6 h since the last sync: refresh the song list
     if (Date.now() - store.get('gdLastSync', 0) > 6 * 36e5) driveSync();
