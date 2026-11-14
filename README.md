@@ -39,8 +39,8 @@ respect Reduce Motion, and can be disabled with Animate background in Settings.
 New installs preview Meteor night; saved theme choices remain selected.
 
 White forest uses a locally served photograph, light surfaces and muted pine
-accents. Both scene assets are included in the offline app shell. Only the Library
-tab lowers the bottom dock; other tabs retain their previous safe-area inset.
+accents. Scene assets are included in the offline app shell. All tabs use the
+same dock inset (Version 23).
 Version 22 adds official, non-generated artwork: Zoro · Asura from Bandai Namco's
 ONE PIECE Bounty Rush site (1220×1220), and Sophie · Stars from Studio Ghibli's
 Howl's Moving Castle gallery (1920×1038). Zoro has violet sparks; Sophie has
@@ -51,6 +51,14 @@ not upscaled or labeled as 4K. `assets/anime-wallpapers-sources.json` records th
 page and image URLs. WebP assets retain their source dimensions and work offline.
 Only small particles animate; the characters remain still. Motion controls,
 hidden-page pause and Reduce Motion apply. Saved theme choices remain selected.
+
+Version 23 keeps the dock at one safe-area inset on all tabs. Menus and the full
+player lock background scrolling and make underlying controls inert. Queue
+updates preserve scroll position for the current song. Swipe-to-close starts
+only on the player header or artwork, not its buttons or seek/queue controls.
+`interactions.js` activates deliberate touch taps once, suppresses compatibility
+clicks and leaves drag scrolling native. Dialogs support focus containment and
+Escape dismissal.
 
 ## Covers and song names
 

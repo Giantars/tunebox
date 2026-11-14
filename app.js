@@ -1621,7 +1621,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 22</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 23</p>
   <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
     <button class="appearance-option" data-act="appearance" data-theme="zoro" aria-pressed="${settings.appearance === 'zoro'}"><span class="appearance-swatch zoro-swatch" aria-hidden="true"></span><span>Zoro · Asura<small>Official character art</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="sophie" aria-pressed="${settings.appearance === 'sophie'}"><span class="appearance-swatch sophie-swatch" aria-hidden="true"></span><span>Sophie · Stars<small>Howl's Moving Castle</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
@@ -1737,6 +1737,7 @@ function setDockCompact(compact, source = 'manual') {
   $('#compactNav').setAttribute('aria-hidden', String(!next));
   $('[data-act="dock-expand"]').setAttribute('aria-expanded', String(!next));
   $('#miniNext').hidden = next;
+  syncOverlayState();
   document.dispatchEvent(new CustomEvent('dock-layout', { detail: { compact: next, source } }));
 }
 let backdropKey = '', backdropRequest = 0, backdropFront = 0;
@@ -1810,7 +1811,12 @@ function renderPlayer() {
 }
 function renderQueue() {
   const q = $('#npQueue');
+  const key = `${curTrack()?.id || ''}|${S.qi}`;
+  const position = !q.classList.contains('hidden') && q.dataset.current === key ? q.scrollTop : 0;
+  q.dataset.current = key;
+  $('#np').classList.toggle('queue-open', S.showQueue);
   $('#btnQueue').classList.toggle('on', S.showQueue);
+  $('#btnQueue').setAttribute('aria-expanded', String(S.showQueue));
   // the YouTube video must stay visible, so it remains above the queue
   $('#npArtWrap').classList.toggle('hidden', S.showQueue && !curIsYT());
   $('#npArtWrap').classList.toggle('compact', S.showQueue && curIsYT());
@@ -1820,47 +1826,86 @@ function renderQueue() {
   const up = S.queue.length - S.qi - 1;
   q.innerHTML = `<div class="small" style="margin:2px 0 6px">Up next · ${up} song${up === 1 ? '' : 's'}${S.shuffle ? ' · shuffled' : ''}</div>`
     + `<div class="list">${S.queue.map((t, i) => (i >= S.qi ? row('queue', t, i, 'q-play') : '')).join('')}</div>`;
+  q.scrollTop = position;
 }
-function openNP() { $('#np').classList.add('open'); }
+let overlayScroll = null, playerReturnFocus = null, sheetReturnFocus = null;
+function syncOverlayState() {
+  const playerOpen = $('#np').classList.contains('open'), sheetOpen = !$('#sheet').classList.contains('hidden');
+  const open = playerOpen || sheetOpen, compact = document.body.classList.contains('dock-compact');
+  if (open && overlayScroll === null) {
+    overlayScroll = window.scrollY;
+    document.body.style.top = `-${overlayScroll}px`;
+    document.body.classList.add('overlay-open');
+  } else if (!open && overlayScroll !== null) {
+    const position = overlayScroll; overlayScroll = null;
+    document.body.classList.remove('overlay-open'); document.body.style.top = '';
+    window.scrollTo(0, position);
+  }
+  $('#view').inert = open;
+  $('#mini').inert = open;
+  $('#mainTabs').inert = open || compact;
+  $('#mainTabs').setAttribute('aria-hidden', String(open || compact));
+  $('#compactNav').inert = open || !compact;
+  $('#compactNav').setAttribute('aria-hidden', String(open || !compact));
+  $('#np').inert = !playerOpen || sheetOpen;
+  $('#np').setAttribute('aria-hidden', String(!playerOpen || sheetOpen));
+  document.body.classList.toggle('sheet-open', sheetOpen);
+}
+function openNP() {
+  playerReturnFocus = document.activeElement;
+  $('#np').classList.add('open'); syncOverlayState();
+  $('#npTop button').focus({ preventScroll: true });
+}
 function closeNP() {
   $('#np').classList.remove('open');
+  syncOverlayState();
+  if (playerReturnFocus?.isConnected && !playerReturnFocus.closest('[inert]')) playerReturnFocus.focus({ preventScroll: true });
   if (curIsYT() && engPlaying()) { ytStop(); toast('YouTube songs play while the player is open'); }
 }
 
 // swipe down to close now-playing
 (() => {
   const np = $('#np');
-  let y0 = null, dy = 0;
+  let y0 = null, x0 = null, dy = 0;
+  function resetDrag() { y0 = x0 = null; dy = 0; np.classList.remove('drag'); np.style.transform = ''; }
   np.addEventListener('touchstart', e => {
-    if (e.target.closest('#seek, #npQueue')) { y0 = null; return; }
-    y0 = e.touches[0].clientY; dy = 0;
+    if (e.touches.length !== 1 || !e.target.closest('#npTop, #npArtWrap') || e.target.closest('button, input, a, #ytBox')) { resetDrag(); return; }
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0;
   }, { passive: true });
   np.addEventListener('touchmove', e => {
     if (y0 == null) return;
     dy = Math.max(0, e.touches[0].clientY - y0);
-    if (dy > 8) { np.classList.add('drag'); np.style.transform = `translateY(${dy}px)`; }
-  }, { passive: true });
+    if (Math.abs(e.touches[0].clientX - x0) > Math.max(12, dy)) { resetDrag(); return; }
+    if (dy > 12) { if (e.cancelable) e.preventDefault(); np.classList.add('drag'); np.style.transform = `translateY(${dy}px)`; }
+  }, { passive: false });
   np.addEventListener('touchend', () => {
     if (y0 == null) return;
-    np.classList.remove('drag');
-    np.style.transform = '';
-    if (dy > 110) closeNP();
-    y0 = null;
+    const close = dy > 110;
+    resetDrag();
+    if (close) closeNP();
   });
+  np.addEventListener('touchcancel', resetDrag, { passive: true });
 })();
 
 /* ---------------- Sheets / toast ---------------- */
 let sheetFns = [];
 function sheet(titleHtml, items) {
-  sheetFns = items.map(x => x.fn);
   const el = $('#sheet');
-  el.innerHTML = `<div class="sheet-bg" data-act="sheet-close"></div><div class="sheet-card">
+  if (el.classList.contains('hidden')) sheetReturnFocus = document.activeElement;
+  sheetFns = items.map(x => x.fn);
+  el.innerHTML = `<div class="sheet-bg" data-act="sheet-close"></div><div class="sheet-card" role="dialog" aria-modal="true" aria-label="Song options">
     ${titleHtml ? `<div class="sheet-title">${titleHtml}</div>` : ''}
     ${items.map((x, i) => `<button class="sheet-btn${x.danger ? ' danger' : ''}" data-act="sheet" data-k="${i}">${esc(x.label)}</button>`).join('')}
     <button class="sheet-btn cancel" data-act="sheet-close">Cancel</button></div>`;
   el.classList.remove('hidden');
+  syncOverlayState();
+  $('.sheet-btn', el)?.focus({ preventScroll: true });
 }
-function closeSheet() { $('#sheet').classList.add('hidden'); $('#sheet').innerHTML = ''; }
+function closeSheet() {
+  $('#sheet').classList.add('hidden'); $('#sheet').innerHTML = ''; sheetFns = [];
+  syncOverlayState();
+  if (sheetReturnFocus?.isConnected && !sheetReturnFocus.closest('[inert]')) sheetReturnFocus.focus({ preventScroll: true });
+}
 let toastTimer = null;
 function toast(msg) {
   const el = $('#toast');
@@ -2012,7 +2057,7 @@ const actions = {
 };
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
-  if (!el) return;
+  if (!el || el.matches(':disabled') || el.closest('[inert]')) return;
   const a = el.dataset.act;
   if (PLAY_ACTS.has(a)) unlock();
   const f = actions[a];

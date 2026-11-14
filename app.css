@@ -336,8 +336,8 @@ body.dock-compact .compact-nav{transform:none;transition:opacity .2s .04s,transf
 @media(prefers-reduced-motion:reduce){.mini,.tabs,.compact-nav,.tab-lens,.mini-open,.mini .icon,.compact-nav>button{transition:none!important}.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px))}body.dock-compact .tabs{transform:none}}
 @media(prefers-reduced-motion:reduce){.toolbar-pressed{transform:none!important}}
 
-/* Only Library uses the lower position; other tabs retain their original inset. */
-body[data-view="library"]{--dock-bottom:8px}
+/* Every screen shares the same safe-area inset and player-to-navigation spacing. */
+:root{--dock-bottom:max(8px,calc(var(--safe-b) - 12px))}
 
 /* Optional white forest study. One static photo, no scroll-time image processing. */
 .forest-scene{display:none}
@@ -499,3 +499,17 @@ html:not(:is([data-theme="zoro"],[data-theme="sophie"])) .anime-weather i,html[d
 .wallpaper-credit a{color:var(--mu);text-decoration-color:#ffffff40;text-underline-offset:3px}
 @media(prefers-reduced-motion:reduce){.anime-weather i{animation:none!important;opacity:0!important}}
 @media(prefers-reduced-transparency:reduce){html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs,html:is([data-theme="zoro"],[data-theme="sophie"]) .mini,html:is([data-theme="zoro"],[data-theme="sophie"]) .compact-nav>button{background:#261e32;backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* Dialogs own scrolling; controls do not participate in the player's close gesture. */
+body.overlay-open{position:fixed;left:0;right:0;width:100%;overflow:hidden}
+body.sheet-open .np{pointer-events:none}
+.sheet-card{overscroll-behavior:contain;touch-action:pan-y;max-height:calc(100dvh - var(--safe-t) - var(--safe-b) - 24px)}
+.sheet-title{position:sticky;top:0;background:inherit;z-index:1;min-height:64px}
+.sheet-btn{touch-action:pan-y;min-height:52px}
+.np-top,.np-info,.np .times,.np .controls,.np-bottom{flex-shrink:0}
+.np-top{touch-action:none}
+.np-queue{overscroll-behavior:contain;touch-action:pan-y}
+.np.queue-open .np-body{justify-content:flex-start;padding-top:10px}
+.np.queue-open .np-queue{flex:1;min-height:0}
+.np-bottom .pill,.addpl,.section-link{min-height:44px}
+.touch-input button:focus-visible{outline:none}
