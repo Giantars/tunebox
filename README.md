@@ -16,3 +16,17 @@ Service workers need HTTPS, so host the folder on GitHub Pages (or any static ho
 After changing files, bump `VERSION` in `sw.js` so phones pick up the new version.
 
 `make_icons.py` regenerates `icons/` (pure Python, no dependencies).
+
+## Glass navigation
+
+`glass.js` adds a custom WebGL lens to the bottom dock, using Apple's
+[Liquid Glass demo](https://developer.apple.com/videos/play/wwdc2025/219/) as a visual reference.
+It approximates edge refraction from visible artwork and selected labels; CSS
+supplies the rest of the live backdrop. This is not Apple's native material or
+a full DOM compositor. Remote artwork requires CORS approval for the optical
+texture; other artwork remains visible through the CSS backdrop.
+
+The renderer draws on scroll, layout changes, and touch, then stops while idle.
+WebGL failure uses the CSS dock. Reduced motion disables touch animation;
+reduced transparency uses an opaque dock. Keep `glass.js` in the service worker's
+shell list and update all asset version parameters with each release.
