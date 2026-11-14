@@ -352,7 +352,7 @@ function doCache(t, { store: doStore = true } = {}) {
     if (c.source === 'drive' && !c.tagged) await applyTags(c, blob);
     if (doStore) {
       await DB.put('blobs', { buf, type, size: buf.byteLength }, t.id);
-      if (c.art && !c.hasArt) await storeArtFromUrl(c);
+      if (c.art && !c.hasArt) queueArtworkSave(c);
       Object.assign(c, { saved: Date.now(), size: buf.byteLength });
       S.cached.add(t.id);
       requestPersist();
@@ -364,16 +364,73 @@ function doCache(t, { store: doStore = true } = {}) {
   p.then(() => inflight.delete(t.id), () => inflight.delete(t.id));
   return p;
 }
+const artworkJobs = [];
+const artworkPending = new Set(), artworkDownloads = new Map(), artworkMemory = new Map();
+let artworkWorkers = 0, artworkMemoryBytes = 0;
+function prioritizeArtworkJobs() {
+  const playing = curTrack()?.id;
+  const priority = job => job.id === playing ? 2 : visibleCoverIds.has(job.id) ? 1 : 0;
+  artworkJobs.sort((a, b) => priority(b) - priority(a));
+}
+function queueArtworkSave(c) {
+  if (!c?.art || c.hasArt || c.artFailed) return;
+  const key = c.id + '|' + c.art;
+  if (artworkPending.has(key)) return;
+  artworkPending.add(key); artworkJobs.push({ id: c.id, url: c.art, key });
+  prioritizeArtworkJobs(); pumpArtworkSaves();
+}
+function pumpArtworkSaves() {
+  if (!navigator.onLine) return;
+  while (artworkWorkers < 2 && artworkJobs.length) {
+    const job = artworkJobs.shift(), c = S.tracks.get(job.id);
+    if (!c || c.art !== job.url || c.hasArt) { artworkPending.delete(job.key); continue; }
+    artworkWorkers++;
+    (async () => {
+      try {
+        const saved = await storeArtFromUrl(c);
+        if (saved && S.tracks.has(c.id) && c.art === job.url) { await saveTrack(c); refreshLookupTrack(c); }
+      } finally {
+        artworkWorkers--; artworkPending.delete(job.key);
+        updateLookupStatus(); pumpArtworkSaves();
+      }
+    })().catch(e => console.warn('artwork cache', e));
+  }
+}
+async function artworkBytes(url) {
+  if (artworkMemory.has(url)) {
+    const data = artworkMemory.get(url); artworkMemory.delete(url); artworkMemory.set(url, data); return data;
+  }
+  if (artworkDownloads.has(url)) return artworkDownloads.get(url);
+  const request = (async () => {
+    const ac = new AbortController(), timeout = setTimeout(() => ac.abort(), 7000);
+    try {
+      const response = await fetch(url, { signal: ac.signal });
+      if (!response.ok) throw new Error('Artwork unavailable');
+      const data = { buf: await response.arrayBuffer(), type: response.headers.get('content-type') || 'image/jpeg' };
+      if (data.buf.byteLength <= 4 * 1024 * 1024) {
+        artworkMemory.set(url, data); artworkMemoryBytes += data.buf.byteLength;
+        while (artworkMemoryBytes > 4 * 1024 * 1024 || artworkMemory.size > 16) {
+          const oldest = artworkMemory.keys().next().value;
+          artworkMemoryBytes -= artworkMemory.get(oldest).buf.byteLength; artworkMemory.delete(oldest);
+        }
+      }
+      return data;
+    } finally { clearTimeout(timeout); }
+  })();
+  artworkDownloads.set(url, request);
+  request.then(() => artworkDownloads.delete(url), () => artworkDownloads.delete(url));
+  return request;
+}
 async function storeArtFromUrl(c) {
-  const ac = new AbortController();
-  const timeout = setTimeout(() => ac.abort(), 7000);
+  const url = c.art;
   try {
-    const ar = await fetch(c.art, { signal: ac.signal });
-    if (!ar.ok) return;
-    await DB.put('blobs', { buf: await ar.arrayBuffer(), type: ar.headers.get('content-type') || 'image/jpeg' }, c.id + '#art');
+    const data = await artworkBytes(url);
+    if (!S.tracks.has(c.id) || c.art !== url) return false;
+    await DB.put('blobs', data, c.id + '#art');
+    if (!S.tracks.has(c.id) || c.art !== url) return false;
     c.hasArt = true;
-  } catch { /* artwork optional */ }
-  finally { clearTimeout(timeout); }
+    return true;
+  } catch { return false; } // The remote cover still displays when offline saving fails.
 }
 // Read ID3 title/artist/album/cover from a downloaded Drive song.
 async function applyTags(c, blob) {
@@ -532,9 +589,14 @@ async function driveSync() {
 }
 
 /* ---------------- Covers + names from the iTunes catalog (free, no key) ---------------- */
-const LOOKUP_VERSION = 3;
+const LOOKUP_VERSION = 4;
 const lookupQ = [];
-let lookupBusy = false, lookupActive = null, lookupNextRequest = 0, lookupError = false, brainzNextRequest = 0;
+const catalogMatches = new Map();
+const visibleCoverIds = new Set();
+let coverObserver = null;
+const observedCovers = new Map();
+let lookupBusy = false, lookupActive = null, lookupNextRequest = 0, lookupError = false, brainzNextRequest = 0, lookupScheduled = false;
+let lookupRetryTimer = null;
 const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
   .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const ownMusic = t => t && (t.source === 'drive' || t.source === 'local');
@@ -552,11 +614,23 @@ function lookupStatusText() {
   if (!settings.lookup) return 'Automatic cover lookup is off.';
   const covered = tracks.filter(hasCover).length;
   if (!navigator.onLine) return `${covered} of ${tracks.length} songs have covers. Connect to the internet to continue.`;
-  if (lookupError) return `${covered} of ${tracks.length} songs have covers. Lookup paused after a connection error. Tap Retry missing covers.`;
+  if (lookupError) return `${covered} of ${tracks.length} songs have covers. Lookup paused after a connection error. It will retry automatically.`;
   if (lookupBusy || lookupQ.length) return `Finding covers: ${lookupQ.length + (lookupActive ? 1 : 0)} remaining. Keep Tunebox open while it checks.`;
   const unmatched = tracks.filter(t => t.lookupStatus === 'unmatched' && !hasCover(t)).length;
   const errors = tracks.filter(t => t.lookupStatus === 'error' && !hasCover(t)).length;
-  return `${covered} of ${tracks.length} songs have covers.${unmatched ? ` ${unmatched} could not be matched.` : ''}${errors ? ' Some lookups failed; tap Retry missing covers.' : ''}`;
+  return `${covered} of ${tracks.length} songs have covers.${unmatched ? ` ${unmatched} could not be matched.` : ''}${errors ? ' Some lookups failed and will retry automatically.' : ''}`;
+}
+function scheduleLookupRetry() {
+  if (lookupRetryTimer || !settings.lookup) return;
+  const times = [...S.tracks.values()].filter(t => ownMusic(t) && t.lookupStatus === 'error' && t.lookupRetryAt > Date.now()).map(t => t.lookupRetryAt);
+  if (!times.length) return;
+  lookupRetryTimer = setTimeout(() => {
+    lookupRetryTimer = null;
+    if (document.hidden || !navigator.onLine || !settings.lookup) return;
+    [...S.tracks.values()].filter(t => t.lookupStatus === 'error').forEach(t => enqueueLookup(t));
+    pumpLookup();
+    scheduleLookupRetry();
+  }, Math.max(50, times.reduce((a, b) => Math.min(a, b), Infinity) - Date.now() + 25));
 }
 function updateLookupStatus() {
   $$('[data-lookup-status]').forEach(el => { el.textContent = lookupStatusText(); });
@@ -567,17 +641,23 @@ function enqueueLookup(t, front = false, force = false) {
   if (lookupActive && lookupActive.id === t.id) return;
   if (!force && t.lookupStatus === 'matched' && hasCover(t)) return;
   if (!force && t.lookupVersion === LOOKUP_VERSION && Date.now() < (t.lookupRetryAt || 0)) return;
-  if (lookupQ.some(x => x.id === t.id)) return;
+  const queued = lookupQ.findIndex(x => x.id === t.id);
+  if (queued >= 0) { if (front && queued > 0) lookupQ.unshift(lookupQ.splice(queued, 1)[0]); return; }
   front ? lookupQ.unshift(t) : lookupQ.push(t);
-  pumpLookup();
+  // Collect a synchronous import/sync batch before choosing its first request.
+  if (!lookupBusy && !lookupScheduled) {
+    lookupScheduled = true;
+    queueMicrotask(() => { lookupScheduled = false; pumpLookup(); });
+  }
 }
-async function catalogSearch(term, country) {
+async function catalogSearch(term, country, limit = 50) {
   const wait = Math.max(0, lookupNextRequest - Date.now());
   lookupNextRequest = Math.max(Date.now(), lookupNextRequest) + 3200;
   if (wait) await new Promise(r => setTimeout(r, wait));
   if (!settings.lookup || !navigator.onLine) throw new Error('LOOKUP_PAUSED');
-  const j = await fetchJSON(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=50&country=${country}`);
+  const j = await fetchJSON(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=${limit}&country=${country}`);
   if (!Array.isArray(j.results)) throw new Error('Invalid catalog response');
+  rememberCatalogMatches(j.results);
   return j.results;
 }
 async function pumpLookup() {
@@ -600,7 +680,7 @@ async function pumpLookup() {
         break; // Keep the remaining queue; don't fail the whole library in a burst.
       } finally { lookupActive = null; }
     }
-  } finally { lookupBusy = false; updateLookupStatus(); }
+  } finally { lookupBusy = false; updateLookupStatus(); scheduleLookupRetry(); }
 }
 function refreshLookupTrack(c) {
   $$(`[data-tid="${CSS.escape(c.id)}"]`).forEach(el => {
@@ -683,8 +763,19 @@ async function lookupMusicBrainz(title, artist, featured) {
     catalogSource: 'musicbrainz', sourceUrl: `https://musicbrainz.org/recording/${recording.id}`,
   };
 }
-async function lookupOne(c) {
-  if (!S.tracks.has(c.id)) return;
+function rememberCatalogMatches(results) {
+  for (const r of results) {
+    if (!r.trackName || !r.artistName || !(r.artworkUrl100 || r.artworkUrl500)) continue;
+    const key = norm(cleanLookupTitle(r.trackName));
+    const existing = catalogMatches.get(key) || [];
+    const identity = r.artistName + '|' + r.trackName + '|' + (r.artworkUrl500 || r.artworkUrl100);
+    if (!existing.some(item => item.artistName + '|' + item.trackName + '|' + (item.artworkUrl500 || item.artworkUrl100) === identity)) {
+      existing.push(r); catalogMatches.set(key, existing.slice(-12));
+    }
+    if (catalogMatches.size > 2000) catalogMatches.delete(catalogMatches.keys().next().value);
+  }
+}
+function lookupContext(c) {
   const fromFile = nameFromFile(c.fname || '', []);
   const featured = featuredArtists((c.title || '') + '\n' + (c.fname || ''));
   const title = titleWithoutFeatured(cleanLookupTitle(c.title || fromFile.title));
@@ -692,47 +783,86 @@ async function lookupOne(c) {
     ? (fromFile.artist === 'Unknown artist' ? '' : fromFile.artist) : c.artist;
   const folderHintOnly = !c.named && fromFile.artist === 'Unknown artist' && featured.length;
   const primaryArtist = folderHintOnly ? '' : String(artist || '').replace(/_/g, ' ').split(/\s*(?:,|&|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i)[0];
-  const nt = norm(title), na = norm(primaryArtist);
   const region = (navigator.language || '').split('-')[1] || 'US';
-  const country = /^[a-z]{2}$/i.test(region) ? region.toUpperCase() : 'US';
+  return { originalTitle: c.title, title, primaryArtist, featured, nt: norm(title), na: norm(primaryArtist), country: /^[a-z]{2}$/i.test(region) ? region.toUpperCase() : 'US' };
+}
+function chooseCatalogMatch(results, context) {
+  const { originalTitle, title, primaryArtist, featured, nt, na } = context;
   const FAKE = /\b(karaoke|type beat|sped up|slowed|reverb|nightcore|instrumental|cover|tribute|originally performed|8d)\b/i;
-  const versions = ['remix', 'live', 'acoustic'];
-  const hint = primaryArtist || featured.join(' ');
-  const terms = [...new Set([hint ? hint + ' ' + title : title, title])].filter(Boolean);
-  const searches = terms.map(term => ({ term, country }));
-  if (country !== 'US' && searches.length) searches.push({ term: searches[0].term, country: 'US' });
-  let best = null;
-  for (const search of searches) {
-    const results = await catalogSearch(search.term, search.country);
-    if (!S.tracks.has(c.id) || !settings.lookup) return;
-    let bestScore = 0, contenders = [];
-    for (const r of results) {
-      if (!r.trackName || !r.artistName) continue;
-      if (!FAKE.test(c.title) && (FAKE.test(r.trackName) || FAKE.test(r.collectionName || ''))) continue;
-      if (versions.some(v => new RegExp('\\b' + v + '\\b', 'i').test(title) !== new RegExp('\\b' + v + '\\b', 'i').test(r.trackName))) continue;
-      const rt = norm(cleanLookupTitle(r.trackName)), ra = norm(r.artistName);
-      let score = rt === nt && nt ? 3 : nt.length > 3 && rt.length > 3 && (rt.startsWith(nt + ' ') || nt.startsWith(rt + ' ')) ? 2 : 0;
-      if (!score) continue;
-      if (na) {
-        if (!artistCreditMatches(primaryArtist, r.artistName)) continue;
-        score += 2;
-      } else if (score < 3) continue;
-      if (featured.length && !featured.every(name => artistCreditMatches(name, r.artistName + ' & ' + featuredArtists(r.trackName).join(' & ')))) continue;
-      if (score > bestScore) { bestScore = score; contenders = [r]; }
-      else if (score === bestScore) contenders.push(r);
-    }
-    // An unknown artist + common title isn't enough evidence to choose a cover.
-    if (contenders.length && (na || new Set(contenders.map(r => norm(r.artistName))).size === 1)) {
-      best = contenders.find(r => r.artworkUrl100) || contenders[0]; break;
-    }
+  let bestScore = 0, contenders = [];
+  for (const r of results) {
+    if (!r.trackName || !r.artistName) continue;
+    if (!FAKE.test(originalTitle) && (FAKE.test(r.trackName) || FAKE.test(r.collectionName || ''))) continue;
+    if (['remix', 'live', 'acoustic'].some(v => new RegExp('\\b' + v + '\\b', 'i').test(title) !== new RegExp('\\b' + v + '\\b', 'i').test(r.trackName))) continue;
+    const rt = norm(cleanLookupTitle(r.trackName));
+    let score = rt === nt && nt ? 3 : nt.length > 3 && rt.length > 3 && (rt.startsWith(nt + ' ') || nt.startsWith(rt + ' ')) ? 2 : 0;
+    if (!score) continue;
+    if (na) { if (!artistCreditMatches(primaryArtist, r.artistName)) continue; score += 2; }
+    else if (score < 3) continue;
+    if (featured.length && !featured.every(name => artistCreditMatches(name, r.artistName + ' & ' + featuredArtists(r.trackName).join(' & ')))) continue;
+    if (score > bestScore) { bestScore = score; contenders = [r]; }
+    else if (score === bestScore) contenders.push(r);
   }
-  if (!S.tracks.has(c.id) || !settings.lookup) return;
-  let fallbackFailed = false;
+  if (contenders.length && (na || new Set(contenders.map(r => norm(r.artistName))).size === 1)) return contenders.find(r => r.artworkUrl500 || r.artworkUrl100) || contenders[0];
+  return null;
+}
+function prioritizeVisibleCovers() {
+  for (const id of visibleCoverIds) enqueueLookup(S.tracks.get(id));
+  const playing = curTrack()?.id;
+  lookupQ.sort((a, b) => (b.id === playing ? 2 : visibleCoverIds.has(b.id) ? 1 : 0) - (a.id === playing ? 2 : visibleCoverIds.has(a.id) ? 1 : 0));
+  prioritizeArtworkJobs(); pumpArtworkSaves(); pumpLookup();
+}
+function observeVisibleCovers() {
+  if (!('IntersectionObserver' in window)) return;
+  if (!coverObserver) coverObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const id = entry.target.querySelector('[data-tid]')?.dataset.tid;
+      if (entry.isIntersecting && id) observedCovers.set(entry.target, id);
+      else observedCovers.delete(entry.target);
+    }
+    visibleCoverIds.clear(); observedCovers.forEach(id => visibleCoverIds.add(id));
+    prioritizeVisibleCovers();
+  }, { rootMargin: '160px 0px' });
+  coverObserver.disconnect(); observedCovers.clear(); visibleCoverIds.clear();
+  $$('#view .row, #view .card, #view .recent-tile').forEach(el => coverObserver.observe(el));
+}
+async function lookupOne(c) {
+  if (!S.tracks.has(c.id)) return;
+  const context = lookupContext(c);
+  const { title, primaryArtist, featured, country, nt } = context;
+  // Reusing a partial catalog sample is safe only with an artist hint. A common
+  // title alone must still be searched in full to check for ambiguous artists.
+  const cached = (catalogMatches.get(nt) || []).filter(r => !c.artFailed || (r.artworkUrl500 || r.artworkUrl100 || '').replace(/\/\d+x\d+bb\./, '/600x600bb.') !== c.art);
+  let best = (primaryArtist || featured.length) ? chooseCatalogMatch(cached, context) : null;
+  let fallbackFailed = false, brainzTried = false, metadataOnly = null;
+  async function brainz() {
+    brainzTried = true;
+    try { return await lookupMusicBrainz(title, primaryArtist, featured); }
+    catch (e) { if (e.message === 'LOOKUP_PAUSED') throw e; fallbackFailed = true; console.warn('metadata fallback', e); return null; }
+  }
+  // Featured-only filenames have a precise MusicBrainz credit hint. Avoid making
+  // them wait through unrelated iTunes searches before using that provider.
+  if (!best && !primaryArtist && featured.length) {
+    const result = await brainz();
+    if (result?.artworkUrl500) best = result; else metadataOnly = result;
+  }
   if (!best) {
-    try { best = await lookupMusicBrainz(title, primaryArtist, featured); }
-    catch (e) { if (e.message === 'LOOKUP_PAUSED') throw e; fallbackFailed = true; console.warn('metadata fallback', e); }
+    const hint = primaryArtist || featured.join(' ');
+    const sameArtistQueued = primaryArtist && lookupQ.some(t => lookupContext(t).na === context.na);
+    const terms = [...new Set([sameArtistQueued ? primaryArtist : '', hint ? hint + ' ' + title : title, title])].filter(Boolean);
+    const searches = terms.map(term => ({ term, country, limit: sameArtistQueued && term === primaryArtist ? 200 : 50 }));
+    if (country !== 'US' && searches.length) searches.push({ ...searches[0], country: 'US' });
+    for (const search of searches) {
+      const results = await catalogSearch(search.term, search.country, search.limit);
+      if (!S.tracks.has(c.id) || !settings.lookup) return;
+      best = chooseCatalogMatch(results, context);
+      if (best) break;
+    }
   }
   if (!S.tracks.has(c.id) || !settings.lookup) return;
+  if (!best) best = brainzTried ? metadataOnly : await brainz();
+  if (!S.tracks.has(c.id) || !settings.lookup) return;
+  if (best) rememberCatalogMatches([best]);
   c.looked = 1; c.lookupVersion = LOOKUP_VERSION;
   c.lookupStatus = best ? 'matched' : fallbackFailed ? 'error' : 'unmatched';
   c.lookupRetryAt = best ? 0 : Date.now() + (fallbackFailed ? 60000 : 86400000);
@@ -748,12 +878,13 @@ async function lookupOne(c) {
     if ((!c.album || c.named !== 'tags') && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
     if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
     refreshLookupTrack(c); // Show the cover immediately; storing its offline copy is optional.
-    if (c.art && !c.hasArt) await storeArtFromUrl(c);
+    if (c.art && !c.hasArt) queueArtworkSave(c);
   }
   if (!S.tracks.has(c.id)) return;
   await saveTrack(c);
   if (best) refreshLookupTrack(c);
   updateLookupStatus();
+  if (c.lookupStatus === 'error') scheduleLookupRetry();
 }
 
 /* ---------------- Artwork ---------------- */
@@ -784,6 +915,8 @@ function swapArt(el, url) {
   img.className = el.className.replace(/\bph\b/, '').trim();
   img.dataset.tid = el.dataset.tid;
   img.alt = '';
+  img.loading = el.closest('#view') ? 'lazy' : 'eager';
+  img.decoding = 'async';
   img.src = url;
   el.replaceWith(img);
 }
@@ -1086,11 +1219,17 @@ window.addEventListener('online', () => {
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
   if (!S.trending.length) loadTrending();
-  [...S.tracks.values()].forEach(t => enqueueLookup(t));
-  pumpLookup();
+  [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
+  pumpLookup(); pumpArtworkSaves();
   if (S.tab === 'home') render();
 });
 window.addEventListener('offline', () => { document.body.classList.add('offline'); if (S.tab === 'home') render(); });
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
+  prioritizeVisibleCovers(); pumpArtworkSaves();
+});
 
 /* lock screen + control center */
 function updateMediaSession(t) {
@@ -1375,6 +1514,7 @@ function renderResults() {
     h = label + note + rows('search', S.results.map(canon));
   }
   el.innerHTML = h;
+  observeVisibleCovers();
 }
 let sTok = 0, sTimer = null;
 async function doSearch() {
@@ -1465,7 +1605,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 18</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 19</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1528,6 +1668,7 @@ function render() {
   v.innerHTML = h;
   if (S.tab === 'search') renderResults();
   if (S.tab === 'settings') updateStorageInfo();
+  observeVisibleCovers();
 }
 function softRender() { if (S.tab === 'search') renderResults(); else render(); }
 let rrTimer = null;
@@ -1623,6 +1764,7 @@ function renderPlayer() {
       $('#seek').style.setProperty('--p', p + '%');
     }
   }
+  enqueueLookup(canon(t), true);
   $('#miniTitle').textContent = t.title;
   $('.mini-open').setAttribute('aria-label', `Open player: ${t.title} by ${t.artist}`);
   $('#miniArtist').textContent = t.artist;
@@ -1889,6 +2031,8 @@ async function init() {
   try {
     const [tr, keys, pls] = await Promise.all([DB.all('tracks'), DB.keys('blobs'), DB.all('playlists')]);
     tr.forEach(t => S.tracks.set(t.id, t));
+    tr.forEach(t => queueArtworkSave(t));
+    rememberCatalogMatches(tr.filter(t => t.named === 'catalog' && t.art && !t.artFailed).map(t => ({ trackName: t.title, artistName: t.artist, collectionName: t.album, artworkUrl500: t.art, catalogSource: t.metadataSource, sourceUrl: t.metadataUrl, trackTimeMillis: (t.duration || 0) * 1000 })));
     keys.forEach(k => { if (!String(k).endsWith('#art')) S.cached.add(k); });
     S.playlists = pls.sort((a, b) => a.created - b.created);
   } catch (e) { toast('Storage unavailable: ' + e.message); }

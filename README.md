@@ -31,18 +31,30 @@ register the exact origin and redirect address in Google Cloud.
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.
+It also resumes when the app returns to the foreground. Visible songs and the
+currently selected song move ahead of the background queue. Temporary connection
+errors retry automatically after a delay while the app is open and online.
 Settings and the file library show progress, connection errors, and unmatched
 songs. Use **Retry missing covers** to retry a past miss. Legacy lookup flags are
 rechecked by the current matcher. Common filename extras such as track numbers
 and official-video labels are removed from searches. Existing embedded tags and
 covers are preserved; ambiguous artist/title matches are left unchanged.
 
-Catalog requests are spaced at least 3.2 seconds apart, including fallback
-searches. Large libraries need time with Tunebox open. Matched artwork is shown
-immediately and saved separately for offline use when its server allows it.
+iTunes requests are spaced at least 3.2 seconds apart, including fallback
+searches. A queue containing several songs by one artist can fetch that artist's
+catalog once, then reuse exact artist/title matches for the remaining tracks.
+Common titles without an artist hint still need a full search to check ambiguity.
+Verified saved matches seed this cache when the app reopens.
+
+Large libraries need time with Tunebox open. Matched artwork appears immediately;
+two separate workers save it for offline use without blocking the next lookup or
+audio playback. Shared album artwork reuses a download. The temporary artwork
+memory cache is limited to 4 MiB and 16 images. Optional offline saving may fail
+when the artwork server does not permit it; the online cover can still display.
 If iTunes has no usable match, a title plus an artist or featured-artist hint is
 checked against [MusicBrainz](https://musicbrainz.org/). High-confidence, exact-title
 recordings use front artwork from the [Cover Art Archive](https://coverartarchive.org/).
+Featured-only filenames try this provider first, avoiding unrelated searches.
 Featured artists can identify files that omit the main artist. Folder names are
 treated as weaker hints in that case. Ambiguous or low-confidence results are not
 applied. Successful matches keep their source URL in the track record. MusicBrainz

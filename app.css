@@ -335,3 +335,6 @@ body.dock-compact .compact-nav{transform:none;transition:opacity .2s .04s,transf
 .mini-open.toolbar-pressed,.mini .icon.toolbar-pressed,.compact-nav>button.toolbar-pressed{transform:scale(.94)}
 @media(prefers-reduced-motion:reduce){.mini,.tabs,.compact-nav,.tab-lens,.mini-open,.mini .icon,.compact-nav>button{transition:none!important}.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px))}body.dock-compact .tabs{transform:none}}
 @media(prefers-reduced-motion:reduce){.toolbar-pressed{transform:none!important}}
+
+/* Keep the complete glass dock closer to the bottom on every phone. */
+:root{--dock-bottom:8px}
