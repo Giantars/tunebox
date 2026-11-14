@@ -101,7 +101,14 @@ const settings = {
   gClientId: GOOGLE_CLIENT_ID,
   gFolder: store.get('gFolder', 'Tunebox'),
   lookup: store.get('lookup', true),
+  appearance: store.get('appearance', 'forest') === 'dark' ? 'dark' : 'forest',
 };
+
+function applyAppearance() {
+  document.documentElement.dataset.theme = settings.appearance;
+  $('meta[name="theme-color"]').content = settings.appearance === 'forest' ? '#f1f3ef' : '#101012';
+}
+applyAppearance();
 
 const audio = $('#audio');
 const artUrls = new Map();   // id -> object URL for stored artwork
@@ -1404,6 +1411,7 @@ async function addToPlaylist(p, t) {
 
 /* ---------------- UI: icons ---------------- */
 const ICONS = {
+  check: ['s', '<path d="m5 12 4 4L19 6"/>'],
   music: ['s', '<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>'],
   home: ['f', '<path d="M12 3 3 10.2V21h6.5v-6h5v6H21V10.2z"/>'],
   search: ['s', '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/>'],
@@ -1459,7 +1467,7 @@ function viewHome() {
   S.lists.recentH = recent;
   S.lists.homeMusic = added;
   const coverCard = (t, i, list) => `<button class="card" data-act="play" data-list="${list}" data-i="${i}">${art(t, 'card-art')}<span class="t">${esc(t.title)}</span><span class="a">${esc(t.artist)}</span></button>`;
-  let h = `<header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
+  let h = `<div class="forest-scene" aria-hidden="true"><img src="assets/white-forest.webp" alt="" decoding="async" fetchpriority="high"></div><header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
   h += `<div class="home-shortcuts"><button data-act="open" data-type="liked"><span class="shortcut-art favorite">${icon('heartOn')}</span><span>Favorites<small>${liked} song${liked === 1 ? '' : 's'}</small></span></button><button data-act="open" data-type="offline"><span class="shortcut-art saved">${icon('download')}</span><span>Downloads<small>${saved} on this device</small></span></button></div>`;
   if (!mine.length) {
     h += `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>${settings.gClientId ? 'Connect Google Drive to load the songs in your Tunebox folder.' : 'Add music from Google Drive or choose files from this device.'}</p><div class="setup-actions"><button class="btn primary" data-act="${settings.gClientId ? 'gd-sync' : 'tab'}"${settings.gClientId ? '' : ' data-tab="settings"'}>${settings.gClientId ? 'Connect & sync' : 'Connect Google Drive'}</button><button class="btn" data-act="import">Add files</button></div></section>`;
@@ -1605,7 +1613,11 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 19</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 20</p>
+  <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
+    <button class="appearance-option" data-act="appearance" data-theme="forest" aria-pressed="${settings.appearance === 'forest'}"><span class="appearance-swatch forest-swatch" aria-hidden="true"></span><span>White forest<small>Light & quiet</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
+    <button class="appearance-option" data-act="appearance" data-theme="dark" aria-pressed="${settings.appearance === 'dark'}"><span class="appearance-swatch dark-swatch" aria-hidden="true"></span><span>Original<small>Classic dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
+  </div></section>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1650,6 +1662,7 @@ async function updateStorageInfo() {
 }
 
 function render() {
+  document.body.dataset.view = S.tab;
   setDockCompact(false, 'view');
   $('#compactTabIcon').innerHTML = icon(S.tab === 'library' ? 'library' : S.tab);
   $$('.tabs button').forEach((b, i) => {
@@ -1907,6 +1920,12 @@ function playlistMenu(p) {
 /* ---------------- Events ---------------- */
 const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev']);
 const actions = {
+  appearance: el => {
+    settings.appearance = el.dataset.theme === 'dark' ? 'dark' : 'forest';
+    store.set('appearance', settings.appearance);
+    applyAppearance(); render();
+    $(`[data-act="appearance"][data-theme="${settings.appearance}"]`)?.focus({ preventScroll: true });
+  },
   tab: el => {
     S.tab = el.dataset.tab; S.sub = null; render(); window.scrollTo(0, 0);
     if (S.tab === 'search' && !S.results.length && !S.searching) doSearch();

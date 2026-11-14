@@ -28,6 +28,16 @@ configured client are preserved. No client secret is stored or required.
 For a different deployment, configure its own Web application OAuth client and
 register the exact origin and redirect address in Google Cloud.
 
+## Appearance
+
+Version 20 previews a White forest appearance with a static, locally served image,
+light surfaces and muted pine accents. Settings → Appearance switches between
+White forest and the original dark appearance, and remembers the choice locally.
+The forest image is included in the offline app shell. It uses no scroll-time
+image processing. Only the Library tab lowers the bottom dock; other tabs retain
+their previous safe-area inset. The image prompt is in
+`assets/white-forest.prompt.txt`.
+
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.

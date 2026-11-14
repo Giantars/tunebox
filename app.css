@@ -336,5 +336,59 @@ body.dock-compact .compact-nav{transform:none;transition:opacity .2s .04s,transf
 @media(prefers-reduced-motion:reduce){.mini,.tabs,.compact-nav,.tab-lens,.mini-open,.mini .icon,.compact-nav>button{transition:none!important}.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px))}body.dock-compact .tabs{transform:none}}
 @media(prefers-reduced-motion:reduce){.toolbar-pressed{transform:none!important}}
 
-/* Keep the complete glass dock closer to the bottom on every phone. */
-:root{--dock-bottom:8px}
+/* Only Library uses the lower position; other tabs retain their original inset. */
+body[data-view="library"]{--dock-bottom:8px}
+
+/* Optional white forest study. One static photo, no scroll-time image processing. */
+.forest-scene{display:none}
+.appearance-group h2{margin:0 0 14px;letter-spacing:0}
+.appearance-options{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.appearance-option{position:relative;text-align:left;border:1px solid var(--line);border-radius:13px;padding:7px 7px 12px;min-width:0;background:var(--bg);font-size:13px;font-weight:600}
+.appearance-option[aria-pressed="true"]{border-color:var(--ac);box-shadow:0 0 0 1px var(--ac)}
+.appearance-option>span:nth-child(2){display:block;padding:0 5px}
+.appearance-option small{display:block;font-size:11px;color:var(--mu);font-weight:400;margin-top:3px}
+.appearance-swatch{display:block;height:82px;border-radius:8px;margin-bottom:10px;position:relative;overflow:hidden}
+.forest-swatch{background:#edf0eb url('assets/white-forest.webp') center 64%/cover}
+.dark-swatch{background:#141416}
+.appearance-swatch::after{content:'';position:absolute;left:12px;right:12px;bottom:10px;height:17px;border:1px solid #8a988c40;border-radius:12px;background:#ffffff70}
+.dark-swatch::after{background:#2e2e33;border-color:#ffffff15}
+.appearance-check{position:absolute;right:11px;bottom:23px;color:var(--ac);visibility:hidden}
+.appearance-check .ic{width:17px;height:17px}
+.appearance-option[aria-pressed="true"] .appearance-check{visibility:visible}
+html[data-theme="forest"]{color-scheme:light;--bg:#f1f3ef;--s1:#ffffffb8;--s2:#e2e7e0;--line:#223a2c15;--tx:#21352b;--mu:#5e6d63;--ac:#35634b;--ok:#347552;--bad:#b33345}
+html[data-theme="forest"] body{background:transparent}
+html[data-theme="forest"] body::before{content:'';position:fixed;inset:0;z-index:-1;background:linear-gradient(#f1f3ef50,#f1f3efed 480px),url('assets/white-forest.webp') center top/cover no-repeat;pointer-events:none}
+html[data-theme="forest"] body[data-view="home"]::before{background:var(--bg)}
+html[data-theme="forest"] #view{position:relative;isolation:isolate}
+html[data-theme="forest"] .forest-scene{display:block;position:absolute;top:0;left:0;right:0;height:345px;z-index:-1;overflow:hidden;pointer-events:none}
+.forest-scene img{width:100%;height:100%;object-fit:cover;object-position:center 70%}
+.forest-scene::after{content:'';position:absolute;inset:0;background:linear-gradient(#f1f3ef38,transparent 40%,#f1f3ef)}
+html[data-theme="forest"] .home-heading{min-height:240px;align-items:flex-start;margin-bottom:8px}
+html[data-theme="forest"] .home-heading h1{font-size:42px;font-weight:650;letter-spacing:-1.5px}
+html[data-theme="forest"] .app-label{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#465b4d}
+html[data-theme="forest"] .profile-button{background:#f8faf5b8;border-color:#ffffffc0;color:var(--tx)}
+html[data-theme="forest"] .home-shortcuts>button{padding:15px 12px;border:1px solid #ffffffa0;border-radius:16px;background:#ffffffe0;box-shadow:0 3px 12px #20362604}
+html[data-theme="forest"] .shortcut-art{background:#e9e9df;color:#68754f}
+html[data-theme="forest"] .shortcut-art.saved{background:#e3ece4;color:#456e56}
+html[data-theme="forest"] .library-setup{background:#ffffffa6;border-color:#ffffffd0;border-radius:20px}
+html[data-theme="forest"] .setup-heading>.ic{color:var(--ac)}
+html[data-theme="forest"] .group{border:1px solid #ffffffb0;background:#ffffffb8}
+html[data-theme="forest"] .btn{background:#e5ebe3;color:var(--tx)}
+html[data-theme="forest"] .btn.primary{background:#345840;color:#fff}
+html[data-theme="forest"] .field,html[data-theme="forest"] .searchbox{background:#ffffffd9;border-color:var(--line)}
+html[data-theme="forest"] .field:focus,html[data-theme="forest"] .searchbox:focus{box-shadow:0 0 0 2px #35634b40}
+html[data-theme="forest"] .seg button.on{background:#fff}
+html[data-theme="forest"] .tabs,html[data-theme="forest"] .mini,html[data-theme="forest"] .compact-nav>button{background:#f8fbf2b3;border-color:#ffffffc9;box-shadow:0 5px 20px #1e382514;backdrop-filter:blur(3px) saturate(1.08);-webkit-backdrop-filter:blur(3px) saturate(1.08)}
+html[data-theme="forest"] .tabs button{color:#5b6b60}
+html[data-theme="forest"] .tabs button.on,html[data-theme="forest"] .tabs.is-touched button.scrub-target{color:#2f5b41}
+html[data-theme="forest"] .tabs.is-touched button.on{color:#5b6b60}
+html[data-theme="forest"] .tab-lens{background:#385b4510}
+html[data-theme="forest"] .tabs.is-touched .tab-lens{background:#fff8;box-shadow:inset 0 .5px 0 #fff,0 2px 6px #1e38250c}
+html[data-theme="forest"] .dock-shade{background:linear-gradient(transparent,#f1f3ef66 45%,#f1f3efad)}
+html[data-theme="forest"] .sheet-card{background:#f6f8f2;border-color:#fff;box-shadow:0 -4px 36px #20362620}
+html[data-theme="forest"] .toast{background:#284332;color:#fff}
+html[data-theme="forest"] input.switch{background:#bcc6bc}
+html[data-theme="forest"] input.switch:checked{background:var(--ac)}
+html[data-theme="forest"] .np{--ac:#ff8b9f;--bg:#151517;--line:#ffffff12}
+@media(hover:hover){html[data-theme="forest"] .home-shortcuts>button:hover{background:#fff}html[data-theme="forest"] .lib-item:hover,html[data-theme="forest"] .row:hover{background:#34584005}}
+@media(prefers-reduced-transparency:reduce){html[data-theme="forest"] .tabs,html[data-theme="forest"] .mini,html[data-theme="forest"] .compact-nav>button{background:#f5f8f0;backdrop-filter:none;-webkit-backdrop-filter:none}}
