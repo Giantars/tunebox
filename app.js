@@ -1280,7 +1280,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 10</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 11</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
@@ -1375,6 +1375,7 @@ function renderPlayState() {
 let lastArtId = null;
 function renderPlayer() {
   const t = curTrack();
+  document.body.classList.toggle('has-player', !!t);
   $('#mini').classList.toggle('hidden', !t);
   if (!t) return;
   if (lastArtId !== t.id || !$('#npArt img, #npArt .ph')) {

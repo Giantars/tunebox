@@ -250,8 +250,15 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--ac);outline-offset:
 @supports not (backdrop-filter:blur(1px)){.tabs,.mini{background:#29292d}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
-/* The optical canvas is decorative; native HTML controls stay above it. */
-.glass-optics{position:absolute;inset:0;width:100%;height:100%;border-radius:inherit;pointer-events:none;z-index:-2}
-.tabs.has-glass-optics{background:#23232785;backdrop-filter:blur(10px) saturate(1.2);-webkit-backdrop-filter:blur(10px) saturate(1.2);border-color:#ffffff2d;box-shadow:inset 0 1px 0 #ffffff12,0 8px 24px #0004}
-.tabs.has-glass-optics .tab-lens{background:linear-gradient(145deg,#ffffff1b,#ffffff08);box-shadow:inset 0 1px 0 #ffffff16,inset 0 -1px 0 #ffffff08}
-@media(prefers-reduced-transparency:reduce){.glass-optics{display:none}.tabs.has-glass-optics{background:#29292d;backdrop-filter:none;-webkit-backdrop-filter:none}}
+/* One live surface, clipped to one boundary. No inset ring or optical overlay. */
+.tabs{overflow:hidden;border:.5px solid #ffffff28;background:rgba(35,35,39,.62);box-shadow:0 5px 20px #0003;backdrop-filter:blur(5px) saturate(1.12);-webkit-backdrop-filter:blur(5px) saturate(1.12)}
+.tabs::before{content:'';position:absolute;inset:0;border-radius:inherit;background:radial-gradient(ellipse 90px 50px at var(--touch-x,50%) 20%,#ffffff15,transparent);opacity:0;transition:opacity .2s;pointer-events:none;z-index:-1}
+.tabs.is-touched::before{opacity:1}
+.tab-lens{background:#ffffff0d;box-shadow:none}
+.mini{background:rgba(37,37,41,.82);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);border:.5px solid #ffffff20;box-shadow:0 4px 16px #0003}
+@supports not (backdrop-filter:blur(1px)){.tabs,.mini{background:#29292d}}
+@media(prefers-reduced-transparency:reduce){.tabs,.mini{background:#29292d;backdrop-filter:none;-webkit-backdrop-filter:none}.tabs::before{display:none}}
+@media(prefers-reduced-motion:reduce){.tabs::before{transition:none}}
+/* Fade text before it reaches navigation; no second blurred surface. */
+.dock-shade{position:fixed;left:0;right:0;bottom:0;height:calc(var(--safe-b) + 105px);background:linear-gradient(transparent,#10101275 45%,#101012b8);pointer-events:none;z-index:18}
+body.has-player .dock-shade{height:calc(var(--safe-b) + 173px)}
