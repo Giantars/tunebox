@@ -24,17 +24,21 @@
     if (previous && dock.hasPointerCapture(previous.id)) dock.releasePointerCapture(previous.id);
   }
   dock.addEventListener('pointerdown', e => {
-    if (!e.isPrimary || e.button !== 0 || !e.target.closest('button')) return;
+    const target = e.target.closest('button[data-tab]');
+    if (!e.isPrimary || e.button !== 0 || !target) return;
     suppressClick = false;
-    gesture = { id: e.pointerId, startX: e.clientX, startY: e.clientY, bounds: dock.getBoundingClientRect(), dragged: false, index: 0 };
+    gesture = { id: e.pointerId, startX: e.clientX, startY: e.clientY, bounds: dock.getBoundingClientRect(), dragged: false, index: 0, startIndex: buttons.indexOf(target) };
     preview(e);
     dock.classList.add('is-touched');
+    // Own the full gesture, including taps that drift between an icon and label.
+    dock.setPointerCapture(e.pointerId);
   }, { passive: true });
   dock.addEventListener('pointermove', e => {
     if (!gesture || e.pointerId !== gesture.id) return;
-    if (!gesture.dragged && Math.abs(e.clientX - gesture.startX) > 7) {
+    const dx = Math.abs(e.clientX - gesture.startX);
+    const dy = Math.abs(e.clientY - gesture.startY);
+    if (!gesture.dragged && dx > 14 && dx > dy * 1.35) {
       gesture.dragged = true;
-      dock.setPointerCapture(e.pointerId);
       dock.classList.add('is-scrubbing');
     }
     if (gesture.dragged) preview(e);
@@ -42,14 +46,16 @@
   window.addEventListener('pointerup', e => {
     if (!gesture || e.pointerId !== gesture.id) return;
     const g = gesture;
-    if (g.dragged) {
-      preview(e);
-      suppressClick = true;
-      const inside = e.clientY >= g.bounds.top - 16 && e.clientY <= g.bounds.bottom + 16;
-      const target = buttons[g.index];
-      reset();
-      if (inside) target.click();
-    } else reset(); // A regular tap keeps the browser's normal click behavior.
+    if (g.dragged) preview(e);
+    const inside = e.clientY >= g.bounds.top - 16 && e.clientY <= g.bounds.bottom + 16
+      && e.clientX >= g.bounds.left - 16 && e.clientX <= g.bounds.right + 16;
+    const tap = Math.abs(e.clientY - g.startY) <= 24;
+    const target = buttons[g.dragged ? g.index : g.startIndex];
+    // Every pointer gesture uses the same activation path. Suppress the later
+    // browser compatibility click, while preserving keyboard and AT clicks.
+    suppressClick = true;
+    reset();
+    if (inside && (g.dragged || tap)) target.click();
   }, { passive: true });
   dock.addEventListener('click', e => {
     if (!suppressClick || !e.isTrusted || e.detail === 0) return;

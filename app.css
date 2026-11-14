@@ -265,7 +265,7 @@ body.has-player .dock-shade{height:calc(var(--safe-b) + 173px)}
 
 /* Proportions and direct-manipulation behavior from the supplied iPhone recording. */
 :root{--minih:48px}
-.tabs{height:64px;border-radius:32px;background:rgba(37,37,40,.47);border-color:#ffffff21;backdrop-filter:blur(3px) saturate(1.12);-webkit-backdrop-filter:blur(3px) saturate(1.12);touch-action:pan-y}
+.tabs{height:64px;border-radius:32px;background:rgba(37,37,40,.47);border-color:#ffffff21;backdrop-filter:blur(3px) saturate(1.12);-webkit-backdrop-filter:blur(3px) saturate(1.12);touch-action:none}
 .tabs button{height:54px;gap:3px;font-size:10px;transition:color .16s}
 .tabs button.on{color:var(--ac)}
 .tab-lens{height:54px;border-radius:28px;background:#ffffff09;transition:transform .32s cubic-bezier(.22,.8,.25,1.08),background .18s;transform-origin:center}
