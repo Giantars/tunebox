@@ -40,8 +40,15 @@ covers are preserved; ambiguous artist/title matches are left unchanged.
 Catalog requests are spaced at least 3.2 seconds apart, including fallback
 searches. Large libraries need time with Tunebox open. Matched artwork is shown
 immediately and saved separately for offline use when its server allows it.
-Songs absent from the catalog or without enough identifying information may
-remain unmatched.
+If iTunes has no usable match, a title plus an artist or featured-artist hint is
+checked against [MusicBrainz](https://musicbrainz.org/). High-confidence, exact-title
+recordings use front artwork from the [Cover Art Archive](https://coverartarchive.org/).
+Featured artists can identify files that omit the main artist. Folder names are
+treated as weaker hints in that case. Ambiguous or low-confidence results are not
+applied. Successful matches keep their source URL in the track record. MusicBrainz
+requests are spaced at least 1.1 seconds apart, and optional artwork caching has
+a timeout. Files absent from both catalogs or without enough identifying
+information may remain unmatched.
 
 ## Glass navigation
 

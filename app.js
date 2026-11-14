@@ -365,12 +365,15 @@ function doCache(t, { store: doStore = true } = {}) {
   return p;
 }
 async function storeArtFromUrl(c) {
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort(), 7000);
   try {
-    const ar = await fetch(c.art);
+    const ar = await fetch(c.art, { signal: ac.signal });
     if (!ar.ok) return;
     await DB.put('blobs', { buf: await ar.arrayBuffer(), type: ar.headers.get('content-type') || 'image/jpeg' }, c.id + '#art');
     c.hasArt = true;
   } catch { /* artwork optional */ }
+  finally { clearTimeout(timeout); }
 }
 // Read ID3 title/artist/album/cover from a downloaded Drive song.
 async function applyTags(c, blob) {
@@ -529,9 +532,9 @@ async function driveSync() {
 }
 
 /* ---------------- Covers + names from the iTunes catalog (free, no key) ---------------- */
-const LOOKUP_VERSION = 2;
+const LOOKUP_VERSION = 3;
 const lookupQ = [];
-let lookupBusy = false, lookupActive = null, lookupNextRequest = 0, lookupError = false;
+let lookupBusy = false, lookupActive = null, lookupNextRequest = 0, lookupError = false, brainzNextRequest = 0;
 const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
   .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 const ownMusic = t => t && (t.source === 'drive' || t.source === 'local');
@@ -552,7 +555,8 @@ function lookupStatusText() {
   if (lookupError) return `${covered} of ${tracks.length} songs have covers. Lookup paused after a connection error. Tap Retry missing covers.`;
   if (lookupBusy || lookupQ.length) return `Finding covers: ${lookupQ.length + (lookupActive ? 1 : 0)} remaining. Keep Tunebox open while it checks.`;
   const unmatched = tracks.filter(t => t.lookupStatus === 'unmatched' && !hasCover(t)).length;
-  return `${covered} of ${tracks.length} songs have covers.${unmatched ? ` ${unmatched} could not be matched.` : ''}`;
+  const errors = tracks.filter(t => t.lookupStatus === 'error' && !hasCover(t)).length;
+  return `${covered} of ${tracks.length} songs have covers.${unmatched ? ` ${unmatched} could not be matched.` : ''}${errors ? ' Some lookups failed; tap Retry missing covers.' : ''}`;
 }
 function updateLookupStatus() {
   $$('[data-lookup-status]').forEach(el => { el.textContent = lookupStatusText(); });
@@ -561,9 +565,8 @@ function updateLookupStatus() {
 function enqueueLookup(t, front = false, force = false) {
   if (!settings.lookup || !ownMusic(t) || (t.hasArt && t.named === 'tags')) return;
   if (lookupActive && lookupActive.id === t.id) return;
-  if (!force && t.lookupVersion === LOOKUP_VERSION) {
-    if ((t.lookupStatus === 'matched' && hasCover(t)) || Date.now() < (t.lookupRetryAt || 0)) return;
-  }
+  if (!force && t.lookupStatus === 'matched' && hasCover(t)) return;
+  if (!force && t.lookupVersion === LOOKUP_VERSION && Date.now() < (t.lookupRetryAt || 0)) return;
   if (lookupQ.some(x => x.id === t.id)) return;
   front ? lookupQ.unshift(t) : lookupQ.push(t);
   pumpLookup();
@@ -612,19 +615,90 @@ function refreshLookupTrack(c) {
   const cur = curTrack();
   if (cur && cur.id === c.id) { lastArtId = null; renderPlayer(); updateMediaSession(c); }
 }
+function artistParts(value) {
+  return String(value || '').split(/\s*(?:,|&|\bfeaturing\b|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i).map(norm).filter(Boolean);
+}
+function artistCreditMatches(hint, credits) {
+  const wanted = norm(hint);
+  return artistParts(credits).some(name => name === wanted || name.startsWith(wanted + ' ') || wanted.startsWith(name + ' '));
+}
+function featuredArtists(value) {
+  const names = [];
+  for (const m of String(value || '').matchAll(/\b(?:featuring|feat|ft)\.?\s+([^)\]\r\n]+)/gi)) {
+    for (const name of cleanLookupTitle(m[1]).split(/\s*(?:,|&|\s+and\s+)\s*/i)) {
+      if (name && !names.some(n => norm(n) === norm(name))) names.push(name.trim());
+    }
+  }
+  return names;
+}
+function titleWithoutFeatured(value) {
+  return value.replace(/\s*[(\[]?\b(?:featuring|feat|ft)\.?\s+.*$/i, '').trim() || value;
+}
+async function lookupMusicBrainz(title, artist, featured) {
+  const hints = [...new Set([artist, ...featured].filter(Boolean))];
+  if (!hints.length) return null; // A title alone is too ambiguous for this fallback.
+  const wait = Math.max(0, brainzNextRequest - Date.now());
+  brainzNextRequest = Math.max(Date.now(), brainzNextRequest) + 1100;
+  if (wait) await new Promise(r => setTimeout(r, wait));
+  if (!settings.lookup || !navigator.onLine) throw new Error('LOOKUP_PAUSED');
+  // Quote user-supplied values as literal Lucene phrases, not query syntax.
+  const phrase = text => '"' + text.replace(/[\\"]/g, '\\$&') + '"';
+  const query = `recording:${phrase(title)} AND artist:${phrase(hints[0])}`;
+  const j = await fetchJSON(`https://musicbrainz.org/ws/2/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=8`);
+  if (!Array.isArray(j.recordings)) throw new Error('Invalid MusicBrainz response');
+  const candidates = j.recordings.filter(r => {
+    const credits = (r['artist-credit'] || []).map(a => a.name || a.artist?.name || '').join(' & ');
+    const description = r.title + ' ' + (r.disambiguation || '');
+    return +r.score >= 95 && norm(cleanLookupTitle(r.title)) === norm(title)
+      && hints.every(hint => artistCreditMatches(hint, credits))
+      && !/\b(karaoke|tribute|sped up|slowed|instrumental|cover)\b/i.test(description)
+      && ['remix', 'live', 'acoustic'].every(v => new RegExp('\\b' + v + '\\b', 'i').test(title) === new RegExp('\\b' + v + '\\b', 'i').test(description));
+  }).sort((a, b) => +b.score - +a.score);
+  if (!candidates.length) return null;
+  const top = candidates.filter(r => +r.score === +candidates[0].score);
+  const creditKey = r => (r['artist-credit'] || []).map(a => norm(a.name || a.artist?.name)).join('|');
+  if (new Set(top.map(creditKey)).size > 1) return null;
+  const recording = top[0];
+  const releases = (recording.releases || []).filter(r => !r.status || r.status === 'Official');
+  const options = [], seen = new Set();
+  for (const release of releases) {
+    const group = release['release-group'];
+    const id = group?.id || release.id, kind = group?.id ? 'release-group' : 'release';
+    if (/^[0-9a-f-]{36}$/i.test(id || '') && !seen.has(id)) { options.push({ id, kind, release }); seen.add(id); }
+  }
+  let cover = '', album = releases[0]?.title || '';
+  for (const option of options.slice(0, 2)) {
+    if (!settings.lookup || !navigator.onLine) throw new Error('LOOKUP_PAUSED');
+    try {
+      const art = await fetchJSON(`https://coverartarchive.org/${option.kind}/${option.id}`, 8000);
+      const front = (art.images || []).find(image => image.front && image.approved !== false);
+      const url = front?.thumbnails?.['500'] || front?.thumbnails?.['250'] || front?.image || '';
+      if (/^https?:\/\//.test(url)) { cover = url.replace(/^http:/, 'https:'); album = option.release.title; break; }
+    } catch (e) { console.warn('cover archive', e); } // Metadata is useful even without an archived cover.
+  }
+  return {
+    trackName: recording.title,
+    artistName: (recording['artist-credit'] || []).map(a => a.name || a.artist?.name).filter(Boolean).join(' & '),
+    collectionName: album, trackTimeMillis: recording.length || 0, artworkUrl500: cover,
+    catalogSource: 'musicbrainz', sourceUrl: `https://musicbrainz.org/recording/${recording.id}`,
+  };
+}
 async function lookupOne(c) {
   if (!S.tracks.has(c.id)) return;
   const fromFile = nameFromFile(c.fname || '', []);
-  const title = cleanLookupTitle(c.title || fromFile.title);
+  const featured = featuredArtists((c.title || '') + '\n' + (c.fname || ''));
+  const title = titleWithoutFeatured(cleanLookupTitle(c.title || fromFile.title));
   const artist = /^(unknown artist|music|songs|downloads|tunebox|mp3|audio|playlist)$/i.test(c.artist || '')
     ? (fromFile.artist === 'Unknown artist' ? '' : fromFile.artist) : c.artist;
-  const primaryArtist = String(artist || '').replace(/_/g, ' ').split(/\s*(?:,|&|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i)[0];
+  const folderHintOnly = !c.named && fromFile.artist === 'Unknown artist' && featured.length;
+  const primaryArtist = folderHintOnly ? '' : String(artist || '').replace(/_/g, ' ').split(/\s*(?:,|&|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i)[0];
   const nt = norm(title), na = norm(primaryArtist);
   const region = (navigator.language || '').split('-')[1] || 'US';
   const country = /^[a-z]{2}$/i.test(region) ? region.toUpperCase() : 'US';
   const FAKE = /\b(karaoke|type beat|sped up|slowed|reverb|nightcore|instrumental|cover|tribute|originally performed|8d)\b/i;
   const versions = ['remix', 'live', 'acoustic'];
-  const terms = [...new Set([na ? primaryArtist + ' ' + title : title, title])].filter(Boolean);
+  const hint = primaryArtist || featured.join(' ');
+  const terms = [...new Set([hint ? hint + ' ' + title : title, title])].filter(Boolean);
   const searches = terms.map(term => ({ term, country }));
   if (country !== 'US' && searches.length) searches.push({ term: searches[0].term, country: 'US' });
   let best = null;
@@ -640,9 +714,10 @@ async function lookupOne(c) {
       let score = rt === nt && nt ? 3 : nt.length > 3 && rt.length > 3 && (rt.startsWith(nt + ' ') || nt.startsWith(rt + ' ')) ? 2 : 0;
       if (!score) continue;
       if (na) {
-        if (!(ra === na || ra.startsWith(na + ' ') || na.startsWith(ra + ' '))) continue;
+        if (!artistCreditMatches(primaryArtist, r.artistName)) continue;
         score += 2;
       } else if (score < 3) continue;
+      if (featured.length && !featured.every(name => artistCreditMatches(name, r.artistName + ' & ' + featuredArtists(r.trackName).join(' & ')))) continue;
       if (score > bestScore) { bestScore = score; contenders = [r]; }
       else if (score === bestScore) contenders.push(r);
     }
@@ -652,15 +727,24 @@ async function lookupOne(c) {
     }
   }
   if (!S.tracks.has(c.id) || !settings.lookup) return;
+  let fallbackFailed = false;
+  if (!best) {
+    try { best = await lookupMusicBrainz(title, primaryArtist, featured); }
+    catch (e) { if (e.message === 'LOOKUP_PAUSED') throw e; fallbackFailed = true; console.warn('metadata fallback', e); }
+  }
+  if (!S.tracks.has(c.id) || !settings.lookup) return;
   c.looked = 1; c.lookupVersion = LOOKUP_VERSION;
-  c.lookupStatus = best ? 'matched' : 'unmatched';
-  c.lookupRetryAt = best ? 0 : Date.now() + 86400000;
+  c.lookupStatus = best ? 'matched' : fallbackFailed ? 'error' : 'unmatched';
+  c.lookupRetryAt = best ? 0 : Date.now() + (fallbackFailed ? 60000 : 86400000);
   if (best) {
-    if (!c.hasArt && best.artworkUrl100) {
-      c.art = best.artworkUrl100.replace(/\/\d+x\d+bb\./, '/600x600bb.');
+    const artwork = best.artworkUrl500 || best.artworkUrl100;
+    if (!c.hasArt && artwork) {
+      c.art = artwork.replace(/\/\d+x\d+bb\./, '/600x600bb.');
       c.artFailed = false;
     }
     if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; c.named = 'catalog'; }
+    c.metadataSource = best.catalogSource || 'itunes';
+    c.metadataUrl = best.sourceUrl || best.trackViewUrl || '';
     if ((!c.album || c.named !== 'tags') && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
     if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
     refreshLookupTrack(c); // Show the cover immediately; storing its offline copy is optional.
@@ -1381,7 +1465,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 15</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 16</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1389,7 +1473,7 @@ function viewSettings() {
     <input id="gFolder" class="field" placeholder="Tunebox" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="small" style="margin-bottom:10px">${gdToken() ? 'Connected.' : store.get('gdEver', false) ? 'Signed out (Google sign-ins last about an hour; saved songs still play).' : 'Not connected yet.'}</div>
     <div class="list-head"><button class="btn" data-act="save-gd">Save</button><button class="btn primary" data-act="gd-sync">${gdToken() ? 'Sync now' : 'Connect'}</button></div></div>
-  <div class="group"><label class="set-row"><span>Find covers and song names online<small>Checks your song names against the iTunes catalog. Large libraries take time; keep Tunebox open while it works.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label><p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p><button class="btn inline" data-act="retry-lookup" ${settings.lookup ? '' : 'disabled'}>Retry missing covers</button></div>
+  <div class="group"><label class="set-row"><span>Find covers and song names online<small>Checks song names and featured artists against music catalogs. Large libraries take time; keep Tunebox open while it works.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label><p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p><button class="btn inline" data-act="retry-lookup" ${settings.lookup ? '' : 'disabled'}>Retry missing covers</button></div>
   <div class="group"><div class="set-head">YouTube key</div>
     <div class="small">Free, no card needed. At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>: create a project, enable <b>YouTube Data API v3</b>, then Credentials, Create credentials, API key. About 100 new searches a day; repeat searches are remembered and cost nothing.</div>
     <input id="ytKey" class="field" placeholder="AIza…" value="${esc(settings.ytKey)}" autocapitalize="off" autocorrect="off" spellcheck="false">
