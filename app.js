@@ -1127,40 +1127,39 @@ function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navi
 function isStandalone() { return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; }
 
 function viewHome() {
-  const hr = new Date().getHours();
-  const greet = hr < 5 ? 'Late night' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
   const all = [...S.tracks.values()];
-  const recent = all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 15);
-  S.lists.recentH = recent;
-  const nOff = all.filter(t => S.cached.has(t.id)).length;
   const mine = all.filter(t => t.source === 'local' || t.source === 'drive');
-  const featured = recent[0] || mine[mine.length - 1];
-  S.lists.homeMusic = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 10);
-  if (featured) S.lists.homeFeatured = [featured];
-  document.documentElement.style.setProperty('--ambient-h', featured ? hue(featured.id) : 325);
-  let h = `<div class="home-heading"><div><div class="brand-line">${icon('music')} TUNEBOX <span class="brand-dot"></span></div><div class="greeting">${greet}</div></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></div><div class="home-title"><h1>Your daily<br><span>sound escape.</span></h1><span class="offline-pill">Offline</span></div>`;
-  h += featured
-    ? `<button class="feature" data-act="play" data-list="homeFeatured" data-i="0"><span class="feature-top"><span class="glass-tag">${icon('music')} IN YOUR ROTATION</span><span class="feature-arrow">↗</span></span><span class="feature-cover">${art(featured, 'feature-art')}</span><span class="feature-copy"><span class="eyebrow">PICK UP WHERE YOU LEFT OFF</span><span class="feature-title">${esc(featured.title)}</span><span class="feature-artist">${esc(featured.artist)}</span></span><span class="feature-play">${icon('play')}</span></button>`
-    : `<div class="welcome-card"><span class="glass-tag">${icon('cloud')} YOUR PERSONAL COLLECTION</span><div class="sound-sculpture" aria-hidden="true"><div class="sculpture-ring ring-one"></div><div class="sculpture-ring ring-two"></div><div class="sculpture-tile">${icon('music')}</div><span class="sculpture-spark">✦</span></div><div class="welcome-copy"><h2>All your music.<br>In your own space.</h2><p>Connect your Drive and let your collection take the stage.</p><div class="welcome-actions"><button class="btn primary inline" data-act="tab" data-tab="settings">Connect Drive ${icon('plus')}</button><button class="welcome-import" data-act="import" aria-label="Add music files">${icon('folder')}</button></div></div></div>`;
-  if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
-    h += `<div class="banner"><div><b>Install Tunebox:</b> tap the Share button in Safari, then <b>Add to Home Screen</b>. It then opens full-screen like a normal app and keeps your saved songs.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
+  const recent = all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6);
+  const added = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 8);
+  const saved = all.filter(t => S.cached.has(t.id) && t.source !== 'local').length;
+  const liked = all.filter(t => t.liked).length;
+  S.lists.recentH = recent;
+  S.lists.homeMusic = added;
+  const coverCard = (t, i, list) => `<button class="card" data-act="play" data-list="${list}" data-i="${i}">${art(t, 'card-art')}<span class="t">${esc(t.title)}</span><span class="a">${esc(t.artist)}</span></button>`;
+  let h = `<header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
+  h += `<div class="home-shortcuts"><button data-act="open" data-type="liked"><span class="shortcut-art favorite">${icon('heartOn')}</span><span>Favorites<small>${liked} song${liked === 1 ? '' : 's'}</small></span></button><button data-act="open" data-type="offline"><span class="shortcut-art saved">${icon('download')}</span><span>Downloads<small>${saved} on this device</small></span></button></div>`;
+  if (!mine.length) {
+    h += `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>${settings.gClientId ? 'Connect Google Drive to load the songs in your Tunebox folder.' : 'Add music from Google Drive or choose files from this device.'}</p><div class="setup-actions"><button class="btn primary" data-act="${settings.gClientId ? 'gd-sync' : 'tab'}"${settings.gClientId ? '' : ' data-tab="settings"'}>${settings.gClientId ? 'Connect & sync' : 'Connect Google Drive'}</button><button class="btn" data-act="import">Add files</button></div></section>`;
   }
-  h += `<div class="quick">
-    <button data-act="open" data-type="liked"><span class="quick-icon">${icon('heartOn')}</span><span>Favorites<small>Your best finds</small></span>${icon('back')}</button>
-    <button data-act="open" data-type="offline"><span class="quick-icon">${icon('download')}</span><span>Offline<small>${nOff} saved songs</small></span>${icon('back')}</button>
-    ${settings.gClientId
-    ? `<button data-act="open" data-type="drive"><span class="quick-icon">${icon('cloud')}</span><span>Cloud library<small>Your collection</small></span>${icon('back')}</button>`
-    : `<button data-act="open" data-type="local"><span class="quick-icon">${icon('folder')}</span><span>On this device<small>Your collection</small></span>${icon('back')}</button>`}
-    <button data-act="tab" data-tab="search"><span class="quick-icon">${icon('search')}</span><span>Discover<small>Find a new favorite</small></span>${icon('back')}</button></div>`;
   if (recent.length) {
-    h += `<h2>Recently played</h2><div class="cards">${recent.map((t, i) => `<div class="card" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></div>`).join('')}</div>`;
+    h += `<h2>Jump back in</h2><div class="recent-grid">${recent.map((t, i) => `<button class="recent-tile" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'art')}<span class="t">${esc(t.title)}</span></button>`).join('')}</div>`;
   }
-  if (S.lists.homeMusic.length) {
-    h += `<h2>Recently added <button class="section-link" data-act="tab" data-tab="library">See all</button></h2><div class="cards">${S.lists.homeMusic.map((t, i) => `<button class="card" data-act="play" data-list="homeMusic" data-i="${i}">${art(t, 'card-art')}<div class="t">${esc(t.title)}</div><div class="a">${esc(t.artist)}</div></button>`).join('')}</div>`;
+  if (added.length) {
+    h += `<h2>Recently added<button class="section-link" data-act="tab" data-tab="library">See all</button></h2><div class="album-grid">${added.map((t, i) => coverCard(t, i, 'homeMusic')).join('')}</div>`;
   }
-  h += `<h2>Trending on Audius</h2>`;
-  if (S.trending.length) h += rows('trending', S.trending.map(canon));
-  else h += `<div class="msg">${navigator.onLine ? 'Loading…' : 'Connect to the internet to see trending songs.'}</div>`;
+  if (S.playlists.length) {
+    h += `<h2>Your playlists<button class="section-link" data-act="new-pl">New playlist</button></h2><div class="cards">${S.playlists.map(p => {
+      const t = p.ids.map(id => S.tracks.get(id)).find(Boolean);
+      return `<button class="card playlist-card" data-act="open" data-type="pl" data-id="${esc(p.id)}">${t ? art(t, 'card-art') : `<span class="card-art playlist-placeholder">${icon('list')}</span>`}<span class="t">${esc(p.name)}</span><span class="a">${p.ids.length} songs</span></button>`;
+    }).join('')}</div>`;
+  }
+  if (S.trending.length) {
+    h += `<h2>On Audius<button class="section-link" data-act="tab" data-tab="search">Explore</button></h2><div class="cards">${S.trending.slice(0, 8).map(canon).map((t, i) => coverCard(t, i, 'homeTrending')).join('')}</div>`;
+    S.lists.homeTrending = S.trending.slice(0, 8).map(canon);
+  }
+  if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
+    h += `<div class="banner"><div>For full-screen listening, use Safari's Share menu and choose <b>Add to Home Screen</b>.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
+  }
   return h;
 }
 
@@ -1253,9 +1252,9 @@ function viewLibrary() {
     drive: all.filter(t => t.source === 'drive').length,
   };
   const item = (type, ic, label) => `<button class="lib-item" data-act="open" data-type="${type}">${icon(ic)}${label}<span class="n">${c[type]}</span></button>`;
-  let h = `<h1>Library<span class="offline-pill">Offline</span></h1>`
+  let h = `<h1>Library<span class="offline-pill">Offline</span></h1><p class="library-summary">${all.length} songs &middot; ${S.playlists.length} playlists</p>`
     + (settings.gClientId || c.drive ? item('drive', 'cloud', 'Google Drive') : '')
-    + item('liked', 'heartOn', 'Liked songs') + item('offline', 'download', 'Downloaded')
+    + item('liked', 'heartOn', 'Favorites') + item('offline', 'download', 'Downloads')
     + item('recent', 'clock', 'Recently played') + item('local', 'folder', 'My files');
   h += `<h2>Playlists <button class="addpl" data-act="new-pl">+ New</button></h2>`;
   if (!S.playlists.length) h += '<div class="small">No playlists yet.</div>';
@@ -1281,7 +1280,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 8</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 9</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
@@ -1382,7 +1381,7 @@ function renderPlayer() {
     lastArtId = t.id;
     $('#miniArt').innerHTML = art(t, 'art');
     $('#npArt').innerHTML = art(t, 'np-art');
-    $('#np').style.setProperty('--npc', `hsl(${hue(t.id)} 35% 22%)`);
+    $('#np').style.setProperty('--npc', `hsl(${hue(t.id)} 12% 17%)`);
     document.documentElement.style.setProperty('--ambient-h', hue(t.id));
     const isYT = t.source === 'youtube';
     $('#npArt').classList.toggle('hidden', isYT);
@@ -1400,7 +1399,7 @@ function renderPlayer() {
   $('#miniArtist').textContent = t.artist;
   $('#npTitle').textContent = t.title;
   $('#npArtist').textContent = t.artist;
-  const src = { local: 'My files', audius: 'Audius', jamendo: 'Jamendo', youtube: 'YouTube' }[t.source] || '';
+  const src = { local: 'My files', drive: 'Google Drive', audius: 'Audius', jamendo: 'Jamendo', youtube: 'YouTube' }[t.source] || '';
   $('#npSrc').textContent = src + (S.cached.has(t.id) && t.source !== 'local' ? ' · saved' : S.downloading.has(t.id) ? ' · saving…' : '');
   const liked = !!canon(t).liked;
   const lk = $('#npLike');
