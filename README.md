@@ -17,6 +17,17 @@ After changing files, bump `VERSION` in `sw.js` so phones pick up the new versio
 
 `make_icons.py` regenerates `icons/` (pure Python, no dependencies).
 
+## Google Drive connection
+
+The browser's public OAuth client ID is configured in `GOOGLE_CLIENT_ID` in
+`app.js`; users only choose their Drive folder and connect their Google account.
+An older pasted client ID is replaced on startup. Tokens belonging to that old
+client are cleared, while music, playlists, folder settings, and tokens for the
+configured client are preserved. No client secret is stored or required.
+
+For a different deployment, configure its own Web application OAuth client and
+register the exact origin and redirect address in Google Cloud.
+
 ## Glass navigation
 
 The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a

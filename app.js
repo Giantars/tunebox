@@ -7,6 +7,8 @@ const APP_NAME = 'tunebox_personal_player';
 const AUDIUS = 'https://api.audius.co/v1';
 const JAMENDO = 'https://api.jamendo.com/v3.0';
 const MAX_SAVE_BYTES = 80 * 1024 * 1024;
+// Public browser OAuth client; no client secret belongs in this app.
+const GOOGLE_CLIENT_ID = '333776787164-f32a3sslenqrhrj9fiirscaab02db2ol.apps.googleusercontent.com';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -85,11 +87,18 @@ const S = {
   showQueue: false,
   restorePos: 0,
 };
+// Replace separately pasted client IDs without removing music or library data.
+// A token issued to a different client must not survive the configuration change.
+if (store.get('gClientId', '') !== GOOGLE_CLIENT_ID) {
+  store.set('gClientId', GOOGLE_CLIENT_ID);
+  store.set('gdTok', null);
+  store.set('gdState', '');
+}
 const settings = {
   jamendoId: store.get('jamendoId', ''),
   autoSave: store.get('autoSave', true),
   ytKey: store.get('ytKey', ''),
-  gClientId: store.get('gClientId', ''),
+  gClientId: GOOGLE_CLIENT_ID,
   gFolder: store.get('gFolder', 'Tunebox'),
   lookup: store.get('lookup', true),
 };
@@ -1280,12 +1289,12 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 13</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 14</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
-    <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
-    <input id="gClientId" class="field" placeholder="…apps.googleusercontent.com" value="${esc(settings.gClientId)}" autocapitalize="off" autocorrect="off" spellcheck="false">
-    <input id="gFolder" class="field" placeholder="Folder name in Drive" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
+    <label class="small" for="gFolder">Music folder in Google Drive</label>
+    <input id="gFolder" class="field" placeholder="Tunebox" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="small" style="margin-bottom:10px">${gdToken() ? 'Connected.' : store.get('gdEver', false) ? 'Signed out (Google sign-ins last about an hour; saved songs still play).' : 'Not connected yet.'}</div>
     <div class="list-head"><button class="btn" data-act="save-gd">Save</button><button class="btn primary" data-act="gd-sync">${gdToken() ? 'Sync now' : 'Connect'}</button></div></div>
   <div class="group"><label class="set-row"><span>Find covers and song names online<small>For your own MP3s without proper tags, looks the song up in the iTunes catalog for the cover, title, artist and album.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label></div>
@@ -1576,16 +1585,15 @@ const actions = {
     toast(settings.jamendoId ? 'Jamendo key saved' : 'Jamendo key cleared');
   },
   'save-gd': () => {
-    settings.gClientId = ($('#gClientId').value || '').trim();
-    settings.gFolder = ($('#gFolder').value || '').trim() || 'Tunebox';
-    store.set('gClientId', settings.gClientId);
+    const folder = $('#gFolder');
+    settings.gFolder = folder ? folder.value.trim() || 'Tunebox' : settings.gFolder;
     store.set('gFolder', settings.gFolder);
     toast('Google Drive settings saved');
     render();
   },
   'gd-sync': () => {
-    const inp = $('#gClientId');
-    if (inp && inp.value.trim() !== settings.gClientId) actions['save-gd']();
+    const folder = $('#gFolder');
+    if (folder && (folder.value.trim() || 'Tunebox') !== settings.gFolder) actions['save-gd']();
     driveSync();
   },
   'save-yt': () => {
