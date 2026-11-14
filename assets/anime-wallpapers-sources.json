@@ -1,0 +1,33 @@
+{
+  "retrieved": "2026-11-14",
+  "notes": "Official anime artwork and a real photograph. Source dimensions measured locally; no upscaling or AI generation. Small animated effects are separate CSS elements; characters remain still.",
+  "wallpapers": [
+    {
+      "theme": "Zoro - Asura",
+      "file": "zoro-official.webp",
+      "width": 1220,
+      "height": 1220,
+      "credit": "Bandai Namco Entertainment / ONE PIECE Bounty Rush",
+      "page": "https://opbr-en.bn-ent.net/character/detail/0002.html",
+      "image": "https://opbr-en.bn-ent.net/assets/data/webp/character/0002_2d.png.webp"
+    },
+    {
+      "theme": "Sophie - Stars",
+      "file": "sophie-stars.webp",
+      "width": 1920,
+      "height": 1038,
+      "credit": "Studio Ghibli / Howl's Moving Castle",
+      "page": "https://www.ghibli.jp/works/howl/",
+      "image": "https://www.ghibli.jp/gallery/howl043.jpg"
+    },
+    {
+      "theme": "White forest",
+      "file": "white-forest-photo.webp",
+      "width": 3840,
+      "height": 2604,
+      "credit": "Unsplash, photograph published December 20, 2016",
+      "page": "https://unsplash.com/photos/photo-of-snow-coated-birch-trees-9erhhb8WwqI",
+      "image": "https://images.unsplash.com/photo-1482207887121-32962f790ddb?fm=jpg&q=90&w=3840&fit=max"
+    }
+  ]
+}

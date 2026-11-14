@@ -94,6 +94,8 @@ if (store.get('gClientId', '') !== GOOGLE_CLIENT_ID) {
   store.set('gdTok', null);
   store.set('gdState', '');
 }
+const APPEARANCES = ['dark', 'forest', 'meteor', 'zoro', 'sophie'];
+const WALLPAPERS = { zoro: 'assets/zoro-official.webp', sophie: 'assets/sophie-stars.webp' };
 const settings = {
   jamendoId: store.get('jamendoId', ''),
   autoSave: store.get('autoSave', true),
@@ -101,14 +103,17 @@ const settings = {
   gClientId: GOOGLE_CLIENT_ID,
   gFolder: store.get('gFolder', 'Tunebox'),
   lookup: store.get('lookup', true),
-  appearance: ['dark', 'forest', 'meteor'].includes(store.get('appearance', 'meteor')) ? store.get('appearance', 'meteor') : 'meteor',
+  appearance: APPEARANCES.includes(store.get('appearance', 'meteor')) ? store.get('appearance', 'meteor') : 'meteor',
   skyMotion: store.get('skyMotion', true),
 };
 
 function applyAppearance() {
   document.documentElement.dataset.theme = settings.appearance;
   document.documentElement.dataset.skyMotion = settings.skyMotion ? 'on' : 'off';
-  $('meta[name="theme-color"]').content = settings.appearance === 'forest' ? '#f1f3ef' : settings.appearance === 'meteor' ? '#101522' : '#101012';
+  $('meta[name="theme-color"]').content = { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[settings.appearance] || '#101012';
+  const wallpaper = $('#animeWallpaper'), src = WALLPAPERS[settings.appearance];
+  if (src) { if (wallpaper.getAttribute('src') !== src) wallpaper.src = src; }
+  else wallpaper.removeAttribute('src');
 }
 applyAppearance();
 
@@ -1470,7 +1475,7 @@ function viewHome() {
   S.lists.recentH = recent;
   S.lists.homeMusic = added;
   const coverCard = (t, i, list) => `<button class="card" data-act="play" data-list="${list}" data-i="${i}">${art(t, 'card-art')}<span class="t">${esc(t.title)}</span><span class="a">${esc(t.artist)}</span></button>`;
-  let h = `<div class="forest-scene" aria-hidden="true"><img src="assets/white-forest.webp" alt="" decoding="async" fetchpriority="high"></div><header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
+  let h = `<div class="forest-scene" aria-hidden="true"><img src="assets/white-forest-photo.webp" alt="" decoding="async" fetchpriority="high"></div><header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
   h += `<div class="home-shortcuts"><button data-act="open" data-type="liked"><span class="shortcut-art favorite">${icon('heartOn')}</span><span>Favorites<small>${liked} song${liked === 1 ? '' : 's'}</small></span></button><button data-act="open" data-type="offline"><span class="shortcut-art saved">${icon('download')}</span><span>Downloads<small>${saved} on this device</small></span></button></div>`;
   if (!mine.length) {
     h += `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>${settings.gClientId ? 'Connect Google Drive to load the songs in your Tunebox folder.' : 'Add music from Google Drive or choose files from this device.'}</p><div class="setup-actions"><button class="btn primary" data-act="${settings.gClientId ? 'gd-sync' : 'tab'}"${settings.gClientId ? '' : ' data-tab="settings"'}>${settings.gClientId ? 'Connect & sync' : 'Connect Google Drive'}</button><button class="btn" data-act="import">Add files</button></div></section>`;
@@ -1616,12 +1621,15 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 21</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 22</p>
   <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
+    <button class="appearance-option" data-act="appearance" data-theme="zoro" aria-pressed="${settings.appearance === 'zoro'}"><span class="appearance-swatch zoro-swatch" aria-hidden="true"></span><span>Zoro · Asura<small>Official character art</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
+    <button class="appearance-option" data-act="appearance" data-theme="sophie" aria-pressed="${settings.appearance === 'sophie'}"><span class="appearance-swatch sophie-swatch" aria-hidden="true"></span><span>Sophie · Stars<small>Howl's Moving Castle</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option meteor-option" data-act="appearance" data-theme="meteor" aria-pressed="${settings.appearance === 'meteor'}"><span class="appearance-swatch meteor-swatch" aria-hidden="true"></span><span>Meteor night<small>A little after dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="forest" aria-pressed="${settings.appearance === 'forest'}"><span class="appearance-swatch forest-swatch" aria-hidden="true"></span><span>White forest<small>Light & quiet</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="dark" aria-pressed="${settings.appearance === 'dark'}"><span class="appearance-swatch dark-swatch" aria-hidden="true"></span><span>Original<small>Classic dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-  </div>${settings.appearance === 'meteor' ? `<label class="set-row sky-motion-setting"><span>Animate meteors<small>A few falling stars across the night sky.</small></span><input type="checkbox" class="switch" id="skyMotion" ${settings.skyMotion ? 'checked' : ''}></label>` : ''}</section>
+  </div>${['meteor', 'zoro', 'sophie'].includes(settings.appearance) ? `<label class="set-row sky-motion-setting"><span>Animate background<small>${settings.appearance === 'zoro' ? 'Violet sparks drift past the artwork.' : 'A few falling stars across the night sky.'}</small></span><input type="checkbox" class="switch" id="skyMotion" ${settings.skyMotion ? 'checked' : ''}></label>` : ''}
+  ${WALLPAPERS[settings.appearance] ? `<p class="small wallpaper-credit">Artwork: <a href="${settings.appearance === 'zoro' ? 'https://opbr-en.bn-ent.net/character/detail/0002.html' : 'https://www.ghibli.jp/works/howl/'}" target="_blank" rel="noopener">${settings.appearance === 'zoro' ? 'Bandai Namco · 1220 × 1220' : 'Studio Ghibli · 1920 × 1038'}</a></p>` : settings.appearance === 'forest' ? `<p class="small wallpaper-credit">Photo: <a href="https://unsplash.com/photos/photo-of-snow-coated-birch-trees-9erhhb8WwqI" target="_blank" rel="noopener">Unsplash · 3840 × 2604</a></p>` : ''}</section>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1925,7 +1933,7 @@ function playlistMenu(p) {
 const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev']);
 const actions = {
   appearance: el => {
-    settings.appearance = ['dark', 'forest', 'meteor'].includes(el.dataset.theme) ? el.dataset.theme : 'meteor';
+    settings.appearance = APPEARANCES.includes(el.dataset.theme) ? el.dataset.theme : 'meteor';
     store.set('appearance', settings.appearance);
     applyAppearance(); render();
     $(`[data-act="appearance"][data-theme="${settings.appearance}"]`)?.focus({ preventScroll: true });

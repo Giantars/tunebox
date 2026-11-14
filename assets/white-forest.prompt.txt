@@ -1,4 +1,0 @@
-Generated with the built-in image_gen tool for Tunebox's White forest appearance.
-Prompt:
-Use case: photorealistic-natural. Asset type: background photograph for a personal music app's optional white forest theme. Create a beautiful quiet real-looking winter birch forest in pale white fog, slender white birch trunks and a few distant conifers, soft snow, barely visible muted sage-grey details, diffused overcast morning light, subtle fine photographic texture, calm restrained editorial photography. Vertical portrait composition, distant depth, no dominant foreground tree, top half airy with light mist and space behind dark interface text. Avoid fantasy, illustration, glowing lights, ornamental elements, harsh contrast, text, people, logos or watermark. This is solely the photograph, no app UI, no phone mockup. Save as a project-usable image.
-The generated PNG was encoded as WebP for a smaller app download.

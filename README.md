@@ -30,18 +30,27 @@ register the exact origin and redirect address in Google Cloud.
 
 ## Appearance
 
-Settings → Appearance switches between Meteor night, White forest and the original
-dark appearance, and remembers the choice locally. Version 21 adds Meteor night:
+Settings → Appearance switches between Zoro, Sophie, Meteor night, White forest
+and the original dark appearance, and remembers the choice locally. Meteor night:
 a static illustrated mountain sky, crescent moon and four staggered meteor trails.
 Only the trails' transforms and opacity animate; there is no animation loop in
 JavaScript or scroll-time image processing. Meteors pause when the app is hidden,
-respect Reduce Motion, and can be disabled with Animate meteors in Settings.
+respect Reduce Motion, and can be disabled with Animate background in Settings.
 New installs preview Meteor night; saved theme choices remain selected.
 
 White forest uses a locally served photograph, light surfaces and muted pine
 accents. Both scene assets are included in the offline app shell. Only the Library
 tab lowers the bottom dock; other tabs retain their previous safe-area inset.
-The forest image prompt is in `assets/white-forest.prompt.txt`.
+Version 22 adds official, non-generated artwork: Zoro · Asura from Bandai Namco's
+ONE PIECE Bounty Rush site (1220×1220), and Sophie · Stars from Studio Ghibli's
+Howl's Moving Castle gallery (1920×1038). Zoro has violet sparks; Sophie has
+occasional falling stars. The White forest image is replaced with a real winter
+photograph from Unsplash (3840×2604). The previous generated forest asset is removed.
+Measured image dimensions and source credits appear in Settings. Anime art is
+not upscaled or labeled as 4K. `assets/anime-wallpapers-sources.json` records the
+page and image URLs. WebP assets retain their source dimensions and work offline.
+Only small particles animate; the characters remain still. Motion controls,
+hidden-page pause and Reduce Motion apply. Saved theme choices remain selected.
 
 ## Covers and song names
 

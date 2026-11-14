@@ -348,7 +348,7 @@ body[data-view="library"]{--dock-bottom:8px}
 .appearance-option>span:nth-child(2){display:block;padding:0 5px}
 .appearance-option small{display:block;font-size:11px;color:var(--mu);font-weight:400;margin-top:3px}
 .appearance-swatch{display:block;height:82px;border-radius:8px;margin-bottom:10px;position:relative;overflow:hidden}
-.forest-swatch{background:#edf0eb url('assets/white-forest.webp') center 64%/cover}
+.forest-swatch{background:#edf0eb url('assets/white-forest-photo.webp') center 64%/cover}
 .dark-swatch{background:#141416}
 .appearance-swatch::after{content:'';position:absolute;left:12px;right:12px;bottom:10px;height:17px;border:1px solid #8a988c40;border-radius:12px;background:#ffffff70}
 .dark-swatch::after{background:#2e2e33;border-color:#ffffff15}
@@ -357,7 +357,7 @@ body[data-view="library"]{--dock-bottom:8px}
 .appearance-option[aria-pressed="true"] .appearance-check{visibility:visible}
 html[data-theme="forest"]{color-scheme:light;--bg:#f1f3ef;--s1:#ffffffb8;--s2:#e2e7e0;--line:#223a2c15;--tx:#21352b;--mu:#5e6d63;--ac:#35634b;--ok:#347552;--bad:#b33345}
 html[data-theme="forest"] body{background:transparent}
-html[data-theme="forest"] body::before{content:'';position:fixed;inset:0;z-index:-1;background:linear-gradient(#f1f3ef50,#f1f3efed 480px),url('assets/white-forest.webp') center top/cover no-repeat;pointer-events:none}
+html[data-theme="forest"] body::before{content:'';position:fixed;inset:0;z-index:-1;background:linear-gradient(#f1f3ef50,#f1f3efed 480px),url('assets/white-forest-photo.webp') center top/cover no-repeat;pointer-events:none}
 html[data-theme="forest"] body[data-view="home"]::before{background:var(--bg)}
 html[data-theme="forest"] #view{position:relative;isolation:isolate}
 html[data-theme="forest"] .forest-scene{display:block;position:absolute;top:0;left:0;right:0;height:345px;z-index:-1;overflow:hidden;pointer-events:none}
@@ -444,3 +444,58 @@ html[data-theme="meteor"] .np{--ac:#f3c8ae}
 @media(hover:hover){html[data-theme="meteor"] .home-shortcuts>button:hover{background:#2c354c}}
 @media(prefers-reduced-motion:reduce){.meteor{animation:none!important;opacity:0!important}}
 @media(prefers-reduced-transparency:reduce){html[data-theme="meteor"] .tabs,html[data-theme="meteor"] .mini,html[data-theme="meteor"] .compact-nav>button{background:#242d43;backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* Official anime artwork retains its source dimensions; small effects move separately. */
+.anime-scene{display:none;position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;contain:strict}
+.anime-scene>img{width:100%;height:100%;object-fit:cover;object-position:center 52%}
+.anime-shade{position:absolute;inset:0;background:linear-gradient(#0c091640,transparent 32%,#0c09162b 58%,#0c0916bd)}
+.anime-weather{position:absolute;inset:0}
+.anime-weather i{position:absolute;left:var(--weather-x,8%);top:0;opacity:0;animation:sparks-drift var(--weather-period,14s) var(--weather-delay,-3s) linear infinite;width:3px;height:3px;border-radius:50%;background:#e3b7fa}
+.anime-weather i:nth-child(2){--weather-x:20%;--weather-delay:-10s;--weather-period:17s}
+.anime-weather i:nth-child(3){--weather-x:32%;--weather-delay:-5s;--weather-period:12s}
+.anime-weather i:nth-child(4){--weather-x:44%;--weather-delay:-13s;--weather-period:19s}
+.anime-weather i:nth-child(5){--weather-x:56%;--weather-delay:-8s;--weather-period:16s}
+.anime-weather i:nth-child(6){--weather-x:68%;--weather-delay:-2s;--weather-period:13s}
+.anime-weather i:nth-child(7){--weather-x:80%;--weather-delay:-6s;--weather-period:18s}
+.anime-weather i:nth-child(8){--weather-x:92%;--weather-delay:-15s;--weather-period:21s}
+.anime-weather i:nth-child(n+9){display:none}
+@keyframes sparks-drift{0%{opacity:0;transform:translate3d(0,108vh,0)}12%{opacity:.6}45%{transform:translate3d(-24px,45vh,0)}85%{opacity:.45}100%{opacity:0;transform:translate3d(35px,-12vh,0)}}
+html:is([data-theme="zoro"],[data-theme="sophie"]){color-scheme:dark;--bg:#18131b;--s1:#211b28ed;--s2:#352a3c;--line:#f2d9ee1a;--tx:#f6eef6;--mu:#c2b1c5;--ac:#edb3d1;--ok:#9fcbb0;--bad:#ffa0b2}
+html[data-theme="sophie"]{--bg:#171827;--s1:#1c1d32ed;--s2:#30314b;--line:#d8d5ff1a;--mu:#b6bbd4;--ac:#b9b8f2}
+html:is([data-theme="zoro"],[data-theme="sophie"]) body{background:transparent;isolation:isolate;min-height:100vh}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .anime-scene{display:block}
+html[data-theme="zoro"] .anime-scene>img{object-fit:contain;object-position:center 19%;background:radial-gradient(ellipse at 50% 35%,#452664,#171323 70%)}
+html[data-theme="sophie"] .anime-scene>img{object-fit:contain;object-position:center 22%;background:radial-gradient(ellipse at 50% 35%,#213557,#11192c 75%)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .home-heading{min-height:min(51vh,440px);align-items:flex-start;margin-bottom:8px}
+html[data-theme="sophie"] .home-heading{min-height:min(42vh,360px)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .home-heading h1{font-size:42px;font-weight:650;letter-spacing:-1.5px;text-shadow:0 2px 16px #0009}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .app-label{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#e1d4e5;text-shadow:0 1px 8px #000}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .profile-button{background:#1b172cbb;border-color:#ebd4ef33;color:#f0deef}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .home-shortcuts>button{background:var(--s1);border:1px solid var(--line);padding:15px 12px;border-radius:16px}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .library-setup{background:var(--s1);border-color:var(--line);border-radius:20px}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .group{background:var(--s1);border:1px solid var(--line)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .btn{background:var(--s2);color:var(--tx)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .btn.primary{background:var(--ac);color:#211829}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .field,html:is([data-theme="zoro"],[data-theme="sophie"]) .searchbox{background:var(--bg);border-color:var(--line)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .seg button.on{background:var(--s2)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs,html:is([data-theme="zoro"],[data-theme="sophie"]) .mini,html:is([data-theme="zoro"],[data-theme="sophie"]) .compact-nav>button{background:#261e32de;border-color:#e4cee633}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs button{color:var(--mu)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs button.on,html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs.is-touched button.scrub-target{color:var(--ac)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs.is-touched button.on{color:var(--mu)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .tab-lens{background:#e0c2f01a}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .dock-shade{background:linear-gradient(transparent,#16102155 45%,#161021b8)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .sheet-card{background:var(--s2);border-color:var(--line)}
+html:is([data-theme="zoro"],[data-theme="sophie"]) body:not([data-view="home"]) .anime-shade{background:#10101bd6}
+html:is([data-theme="zoro"],[data-theme="sophie"]) .np{--ac:#efbddb}
+html[data-theme="sophie"] .anime-weather i{left:86%;top:8%;width:90px;height:1.5px;border-radius:100%;background:linear-gradient(90deg,#fff3df,#c8c3ee80 20%,transparent);animation:meteor-fall 19s 0s linear infinite}
+html[data-theme="sophie"] .anime-weather i:nth-child(2){left:104%;top:28%;animation-delay:5s;animation-duration:23s}
+html[data-theme="sophie"] .anime-weather i:nth-child(3){left:59%;top:4%;animation-delay:11s;animation-duration:29s}
+html[data-theme="sophie"] .anime-weather i:nth-child(n+4){display:none}
+html:not(:is([data-theme="zoro"],[data-theme="sophie"])) .anime-weather i,html[data-sky-motion="off"] .anime-weather i{animation:none;opacity:0}
+.sky-paused .anime-weather i{animation-play-state:paused!important}
+.zoro-swatch{background:#21151f url('assets/zoro-official.webp') center/contain no-repeat}
+.sophie-swatch{background:#181b2b url('assets/sophie-stars.webp') center/cover}
+.wallpaper-credit{margin:14px 0 0;font-size:11px;line-height:1.6}
+.wallpaper-credit a{color:var(--mu);text-decoration-color:#ffffff40;text-underline-offset:3px}
+@media(prefers-reduced-motion:reduce){.anime-weather i{animation:none!important;opacity:0!important}}
+@media(prefers-reduced-transparency:reduce){html:is([data-theme="zoro"],[data-theme="sophie"]) .tabs,html:is([data-theme="zoro"],[data-theme="sophie"]) .mini,html:is([data-theme="zoro"],[data-theme="sophie"]) .compact-nav>button{background:#261e32;backdrop-filter:none;-webkit-backdrop-filter:none}}
