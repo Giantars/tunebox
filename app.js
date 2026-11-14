@@ -1280,7 +1280,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 7</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Put your MP3s in a Drive folder, paste your Google <b>OAuth client ID</b> below, then tap Connect. Songs stream from Drive; ones you play are kept on the phone.</div>
@@ -1665,6 +1665,21 @@ async function init() {
   }
   // finish cover/name lookups that were interrupted last time
   [...S.tracks.values()].forEach(t => enqueueLookup(t));
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(e => console.warn('sw', e));
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    let hadController = !!navigator.serviceWorker.controller;
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) { hadController = true; return; }
+      if (refreshing) return;
+      if (engPlaying()) { toast('Update ready. Reopen Tunebox when you finish listening.'); return; }
+      refreshing = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+      const checkUpdate = () => reg.update().catch(e => console.warn('sw update', e));
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+      checkUpdate();
+    }).catch(e => console.warn('sw', e));
+  }
 }
 init();
