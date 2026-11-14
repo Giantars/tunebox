@@ -28,6 +28,21 @@ configured client are preserved. No client secret is stored or required.
 For a different deployment, configure its own Web application OAuth client and
 register the exact origin and redirect address in Google Cloud.
 
+## Covers and song names
+
+Automatic catalog lookup resumes for existing Drive songs as well as new imports.
+Settings and the file library show progress, connection errors, and unmatched
+songs. Use **Retry missing covers** to retry a past miss. Legacy lookup flags are
+rechecked by the current matcher. Common filename extras such as track numbers
+and official-video labels are removed from searches. Existing embedded tags and
+covers are preserved; ambiguous artist/title matches are left unchanged.
+
+Catalog requests are spaced at least 3.2 seconds apart, including fallback
+searches. Large libraries need time with Tunebox open. Matched artwork is shown
+immediately and saved separately for offline use when its server allows it.
+Songs absent from the catalog or without enough identifying information may
+remain unmatched.
+
 ## Glass navigation
 
 The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a

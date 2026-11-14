@@ -510,7 +510,7 @@ async function driveSync() {
     for (const f of found) {
       const id = 'gd:' + f.id;
       seen.add(id);
-      if (S.tracks.has(id)) continue;
+      if (S.tracks.has(id)) { enqueueLookup(S.tracks.get(id)); continue; }
       const n = nameFromFile(f.name, f.path);
       fresh.push({ id, source: 'drive', rid: f.id, ...n, duration: 0, size: +f.size || 0, ext: (f.name.split('.').pop() || 'mp3').toLowerCase(), fname: f.name, added: Date.now() });
     }
@@ -529,76 +529,154 @@ async function driveSync() {
 }
 
 /* ---------------- Covers + names from the iTunes catalog (free, no key) ---------------- */
+const LOOKUP_VERSION = 2;
 const lookupQ = [];
-let lookupBusy = false;
-const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
-  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
-function enqueueLookup(t, front = false) {
-  if (!settings.lookup || !t || t.looked || (t.source !== 'drive' && t.source !== 'local')) return;
+let lookupBusy = false, lookupActive = null, lookupNextRequest = 0, lookupError = false;
+const norm = s => String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/, ' ').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const ownMusic = t => t && (t.source === 'drive' || t.source === 'local');
+const hasCover = t => !!(t.hasArt || (t.art && !t.artFailed));
+function cleanLookupTitle(value) {
+  return String(value || '').replace(/\.(mp3|m4a|aac|wav|flac|ogg|opus)$/i, '').replace(/_/g, ' ')
+    .replace(/^\d{1,3}\s*[-.)]?\s+/, '')
+    .replace(/\s*[([][^)\]]*(?:official|lyrics?|music video|visuali[sz]er|audio|\bHD\b|4K)[^)\]]*[)\]]/gi, '')
+    .replace(/\s*\[[A-Za-z0-9_-]{11}\]\s*$/, '')
+    .replace(/\s*[-|]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|lyrics?)\s*$/i, '').trim();
+}
+function lookupStatusText() {
+  const tracks = [...S.tracks.values()].filter(ownMusic);
+  if (!tracks.length) return 'Add songs to find their covers and names.';
+  if (!settings.lookup) return 'Automatic cover lookup is off.';
+  const covered = tracks.filter(hasCover).length;
+  if (!navigator.onLine) return `${covered} of ${tracks.length} songs have covers. Connect to the internet to continue.`;
+  if (lookupError) return `${covered} of ${tracks.length} songs have covers. Lookup paused after a connection error. Tap Retry missing covers.`;
+  if (lookupBusy || lookupQ.length) return `Finding covers: ${lookupQ.length + (lookupActive ? 1 : 0)} remaining. Keep Tunebox open while it checks.`;
+  const unmatched = tracks.filter(t => t.lookupStatus === 'unmatched' && !hasCover(t)).length;
+  return `${covered} of ${tracks.length} songs have covers.${unmatched ? ` ${unmatched} could not be matched.` : ''}`;
+}
+function updateLookupStatus() {
+  $$('[data-lookup-status]').forEach(el => { el.textContent = lookupStatusText(); });
+  $$('[data-act="retry-lookup"]').forEach(el => { el.disabled = !settings.lookup; });
+}
+function enqueueLookup(t, front = false, force = false) {
+  if (!settings.lookup || !ownMusic(t) || (t.hasArt && t.named === 'tags')) return;
+  if (lookupActive && lookupActive.id === t.id) return;
+  if (!force && t.lookupVersion === LOOKUP_VERSION) {
+    if ((t.lookupStatus === 'matched' && hasCover(t)) || Date.now() < (t.lookupRetryAt || 0)) return;
+  }
   if (lookupQ.some(x => x.id === t.id)) return;
   front ? lookupQ.unshift(t) : lookupQ.push(t);
   pumpLookup();
 }
+async function catalogSearch(term, country) {
+  const wait = Math.max(0, lookupNextRequest - Date.now());
+  lookupNextRequest = Math.max(Date.now(), lookupNextRequest) + 3200;
+  if (wait) await new Promise(r => setTimeout(r, wait));
+  if (!settings.lookup || !navigator.onLine) throw new Error('LOOKUP_PAUSED');
+  const j = await fetchJSON(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=50&country=${country}`);
+  if (!Array.isArray(j.results)) throw new Error('Invalid catalog response');
+  return j.results;
+}
 async function pumpLookup() {
-  if (lookupBusy) return;
-  lookupBusy = true;
-  while (lookupQ.length && navigator.onLine) {
-    const t = lookupQ.shift();
-    try { await lookupOne(canon(t)); } catch (e) { console.warn('lookup', e); }
-    await new Promise(r => setTimeout(r, 3200)); // iTunes allows about 20 lookups a minute
-  }
-  lookupBusy = false;
+  if (lookupBusy || !settings.lookup || !navigator.onLine) return;
+  lookupBusy = true; lookupError = false;
+  try {
+    while (lookupQ.length && navigator.onLine && settings.lookup) {
+      const t = canon(lookupQ.shift());
+      if (!S.tracks.has(t.id)) continue;
+      lookupActive = t; updateLookupStatus();
+      try { await lookupOne(t); }
+      catch (e) {
+        if (e.message === 'LOOKUP_PAUSED') { lookupQ.unshift(t); break; }
+        lookupError = true;
+        if (S.tracks.has(t.id)) {
+          t.lookupStatus = 'error'; t.lookupVersion = LOOKUP_VERSION; t.lookupRetryAt = Date.now() + 60000;
+          await saveTrack(t);
+        }
+        console.warn('lookup', e);
+        break; // Keep the remaining queue; don't fail the whole library in a burst.
+      } finally { lookupActive = null; }
+    }
+  } finally { lookupBusy = false; updateLookupStatus(); }
+}
+function refreshLookupTrack(c) {
+  $$(`[data-tid="${CSS.escape(c.id)}"]`).forEach(el => {
+    const item = el.closest('.row, .card, .recent-tile');
+    const src = artSrc(c);
+    if (src) swapArt(el, src);
+    if (!item) return;
+    const title = $('.t', item), artist = $('.a .x', item) || $('.a', item);
+    if (title) title.textContent = c.title;
+    if (artist) artist.textContent = c.artist + (item.classList.contains('row') && c.duration ? ' \u00b7 ' + fmt(c.duration) : '');
+  });
+  const cur = curTrack();
+  if (cur && cur.id === c.id) { lastArtId = null; renderPlayer(); updateMediaSession(c); }
 }
 async function lookupOne(c) {
-  if (c.looked || !S.tracks.has(c.id)) return;
-  const known = c.artist && c.artist !== 'Unknown artist';
-  const country = ((navigator.language || 'en-US').split('-')[1] || 'US').toUpperCase();
-  const nt = norm(c.title), na = norm(c.artist);
-  // never pick covers/edits unless the file itself is one
+  if (!S.tracks.has(c.id)) return;
+  const fromFile = nameFromFile(c.fname || '', []);
+  const title = cleanLookupTitle(c.title || fromFile.title);
+  const artist = /^(unknown artist|music|songs|downloads|tunebox|mp3|audio|playlist)$/i.test(c.artist || '')
+    ? (fromFile.artist === 'Unknown artist' ? '' : fromFile.artist) : c.artist;
+  const primaryArtist = String(artist || '').replace(/_/g, ' ').split(/\s*(?:,|&|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i)[0];
+  const nt = norm(title), na = norm(primaryArtist);
+  const region = (navigator.language || '').split('-')[1] || 'US';
+  const country = /^[a-z]{2}$/i.test(region) ? region.toUpperCase() : 'US';
   const FAKE = /\b(karaoke|type beat|sped up|slowed|reverb|nightcore|instrumental|cover|tribute|originally performed|8d)\b/i;
-  const allowFake = FAKE.test(c.title);
-  const terms = known ? [c.artist + ' ' + c.title, c.title] : [c.title];
-  let best = null, bestScore = 0;
-  for (const term of terms) {
-    const j = await fetchJSON(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&entity=song&limit=25&country=${country}`);
-    for (const r of j.results || []) {
-      if (!allowFake && (FAKE.test(r.trackName) || FAKE.test(r.collectionName || ''))) continue;
-      const rt = norm(r.trackName), ra = norm(r.artistName);
-      let sc = 0;
-      if (rt === nt) sc += 3;
-      else if (rt && nt && (rt.includes(nt) || nt.includes(rt))) sc += 2;
-      else continue;
-      if (known && na) {
-        if (ra.includes(na) || na.includes(ra) || ra.split(' ')[0] === na.split(' ')[0]) sc += 2;
-        else continue;
-      }
-      if (sc > bestScore) { best = r; bestScore = sc; }
+  const versions = ['remix', 'live', 'acoustic'];
+  const terms = [...new Set([na ? primaryArtist + ' ' + title : title, title])].filter(Boolean);
+  const searches = terms.map(term => ({ term, country }));
+  if (country !== 'US' && searches.length) searches.push({ term: searches[0].term, country: 'US' });
+  let best = null;
+  for (const search of searches) {
+    const results = await catalogSearch(search.term, search.country);
+    if (!S.tracks.has(c.id) || !settings.lookup) return;
+    let bestScore = 0, contenders = [];
+    for (const r of results) {
+      if (!r.trackName || !r.artistName) continue;
+      if (!FAKE.test(c.title) && (FAKE.test(r.trackName) || FAKE.test(r.collectionName || ''))) continue;
+      if (versions.some(v => new RegExp('\\b' + v + '\\b', 'i').test(title) !== new RegExp('\\b' + v + '\\b', 'i').test(r.trackName))) continue;
+      const rt = norm(cleanLookupTitle(r.trackName)), ra = norm(r.artistName);
+      let score = rt === nt && nt ? 3 : nt.length > 3 && rt.length > 3 && (rt.startsWith(nt + ' ') || nt.startsWith(rt + ' ')) ? 2 : 0;
+      if (!score) continue;
+      if (na) {
+        if (!(ra === na || ra.startsWith(na + ' ') || na.startsWith(ra + ' '))) continue;
+        score += 2;
+      } else if (score < 3) continue;
+      if (score > bestScore) { bestScore = score; contenders = [r]; }
+      else if (score === bestScore) contenders.push(r);
     }
-    if (best) break;
+    // An unknown artist + common title isn't enough evidence to choose a cover.
+    if (contenders.length && (na || new Set(contenders.map(r => norm(r.artistName))).size === 1)) {
+      best = contenders.find(r => r.artworkUrl100) || contenders[0]; break;
+    }
   }
-  c.looked = 1;
+  if (!S.tracks.has(c.id) || !settings.lookup) return;
+  c.looked = 1; c.lookupVersion = LOOKUP_VERSION;
+  c.lookupStatus = best ? 'matched' : 'unmatched';
+  c.lookupRetryAt = best ? 0 : Date.now() + 86400000;
   if (best) {
     if (!c.hasArt && best.artworkUrl100) {
       c.art = best.artworkUrl100.replace(/\/\d+x\d+bb\./, '/600x600bb.');
-      if (S.cached.has(c.id)) await storeArtFromUrl(c);
+      c.artFailed = false;
     }
-    if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; }
-    if (!c.album && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
+    if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; c.named = 'catalog'; }
+    if ((!c.album || c.named !== 'tags') && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
     if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
+    refreshLookupTrack(c); // Show the cover immediately; storing its offline copy is optional.
+    if (c.art && !c.hasArt) await storeArtFromUrl(c);
   }
+  if (!S.tracks.has(c.id)) return;
   await saveTrack(c);
-  if (best) {
-    $$(`[data-tid="${CSS.escape(c.id)}"]`).forEach(el => { const src = artSrc(c); if (src) swapArt(el, src); });
-    const cur = curTrack();
-    if (cur && cur.id === c.id) { lastArtId = null; renderPlayer(); updateMediaSession(c); }
-  }
+  if (best) refreshLookupTrack(c);
+  updateLookupStatus();
 }
 
 /* ---------------- Artwork ---------------- */
 function artSrc(t) {
   if (artUrls.has(t.id)) return artUrls.get(t.id);
-  if (t.source === 'local' || !navigator.onLine) { if (t.hasArt) loadArt(t.id); return ''; }
-  return t.art || '';
+  if (t.hasArt) loadArt(t.id);
+  return navigator.onLine ? t.art || '' : '';
 }
 const artLoading = new Set();
 async function loadArt(id) {
@@ -637,12 +715,23 @@ document.addEventListener('error', e => {
   img.dataset.fb = '1';
   const id = img.dataset.tid;
   const t = S.tracks.get(id);
+  if (t && t.art && !t.hasArt) {
+    t.artFailed = true;
+    saveTrack(t);
+    updateLookupStatus();
+  }
   if (t && t.hasArt) {
     getBlob(id + '#art').then(b => {
       if (b) { const u = URL.createObjectURL(b); artUrls.set(id, u); img.src = u; }
       else img.replaceWith(phEl(img, t));
     }).catch(() => img.replaceWith(phEl(img, t)));
   } else img.replaceWith(phEl(img, t || { id, title: '?' }));
+}, true);
+document.addEventListener('load', e => {
+  const img = e.target;
+  if (!(img instanceof HTMLImageElement) || !img.dataset.tid) return;
+  const t = S.tracks.get(img.dataset.tid);
+  if (t && t.artFailed) { t.artFailed = false; saveTrack(t); updateLookupStatus(); }
 }, true);
 function phEl(img, t) {
   const d = document.createElement('div');
@@ -913,6 +1002,8 @@ window.addEventListener('online', () => {
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
   if (!S.trending.length) loadTrending();
+  [...S.tracks.values()].forEach(t => enqueueLookup(t));
+  pumpLookup();
   if (S.tab === 'home') render();
 });
 window.addEventListener('offline', () => { document.body.classList.add('offline'); if (S.tab === 'home') render(); });
@@ -1282,6 +1373,7 @@ function viewList() {
     h += `<div class="list-head"><button class="btn primary" data-act="gd-sync">${icon('sync')}${last ? 'Sync' : 'Connect & sync'}</button></div>`
       + (last ? `<div class="small" style="margin:-4px 0 10px">Last synced ${new Date(last).toLocaleString()}. Songs stream from Drive and are kept on the phone after you play them.</div>` : '');
   }
+  if (S.sub.type === 'drive' || S.sub.type === 'local') h += `<p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p>`;
   if (L.arr.length) {
     h += `<div class="list-head"><button class="btn" data-act="play-all" data-list="${esc(key)}">${icon('play')}Play</button><button class="btn" data-act="shuffle-all" data-list="${esc(key)}">${icon('shuffle')}Shuffle</button></div>`;
     h += rows(key, L.arr);
@@ -1289,7 +1381,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 14</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 15</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1297,7 +1389,7 @@ function viewSettings() {
     <input id="gFolder" class="field" placeholder="Tunebox" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="small" style="margin-bottom:10px">${gdToken() ? 'Connected.' : store.get('gdEver', false) ? 'Signed out (Google sign-ins last about an hour; saved songs still play).' : 'Not connected yet.'}</div>
     <div class="list-head"><button class="btn" data-act="save-gd">Save</button><button class="btn primary" data-act="gd-sync">${gdToken() ? 'Sync now' : 'Connect'}</button></div></div>
-  <div class="group"><label class="set-row"><span>Find covers and song names online<small>For your own MP3s without proper tags, looks the song up in the iTunes catalog for the cover, title, artist and album.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label></div>
+  <div class="group"><label class="set-row"><span>Find covers and song names online<small>Checks your song names against the iTunes catalog. Large libraries take time; keep Tunebox open while it works.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label><p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p><button class="btn inline" data-act="retry-lookup" ${settings.lookup ? '' : 'disabled'}>Retry missing covers</button></div>
   <div class="group"><div class="set-head">YouTube key</div>
     <div class="small">Free, no card needed. At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>: create a project, enable <b>YouTube Data API v3</b>, then Credentials, Create credentials, API key. About 100 new searches a day; repeat searches are remembered and cost nothing.</div>
     <input id="ytKey" class="field" placeholder="AIza…" value="${esc(settings.ytKey)}" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -1584,6 +1676,12 @@ const actions = {
     store.set('jamendoId', settings.jamendoId);
     toast(settings.jamendoId ? 'Jamendo key saved' : 'Jamendo key cleared');
   },
+  'retry-lookup': () => {
+    if (!settings.lookup) return;
+    lookupError = false;
+    [...S.tracks.values()].filter(t => ownMusic(t) && (!hasCover(t) || t.lookupStatus === 'error')).forEach(t => enqueueLookup(t, false, true));
+    pumpLookup(); updateLookupStatus();
+  },
   'save-gd': () => {
     const folder = $('#gFolder');
     settings.gFolder = folder ? folder.value.trim() || 'Tunebox' : settings.gFolder;
@@ -1634,7 +1732,8 @@ document.addEventListener('change', e => {
   if (e.target.id === 'lookup') {
     settings.lookup = e.target.checked;
     store.set('lookup', settings.lookup);
-    if (settings.lookup) [...S.tracks.values()].forEach(t => enqueueLookup(t));
+    if (settings.lookup) { [...S.tracks.values()].forEach(t => enqueueLookup(t)); pumpLookup(); }
+    updateLookupStatus();
   }
   if (e.target.id === 'filepick') { importFiles(e.target.files).finally(() => { e.target.value = ''; }); }
 });

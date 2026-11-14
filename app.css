@@ -285,3 +285,12 @@ body.has-player .dock-shade{height:calc(var(--safe-b) + 145px)}
 @supports not (backdrop-filter:blur(1px)){.tabs,.mini{background:#29292d}}
 @media(prefers-reduced-transparency:reduce){.tabs,.mini{background:#29292d;backdrop-filter:none;-webkit-backdrop-filter:none}.tabs.is-touched .tab-lens{background:#45454b;box-shadow:none}}
 @media(prefers-reduced-motion:reduce){.tab-lens,.tabs button{transition:none}.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px))}}
+
+/* Bring the dock closer to the Home indicator without covering it. */
+:root{--dock-bottom:max(6px,calc(var(--safe-b) - 12px))}
+.tabs{bottom:var(--dock-bottom)}
+.mini{bottom:calc(var(--dock-bottom) + 70px)}
+.dock-shade{height:calc(var(--dock-bottom) + 84px)}
+body.has-player .dock-shade{height:calc(var(--dock-bottom) + 140px)}
+.btn:disabled{opacity:.4;cursor:default}
+[data-lookup-status]{line-height:1.5}
