@@ -12,7 +12,7 @@
 <link rel="icon" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <script>try{const t=JSON.parse(localStorage.getItem('tb.appearance'));document.documentElement.dataset.theme=['dark','forest','meteor','zoro','sophie'].includes(t)?t:'meteor';document.documentElement.dataset.skyMotion=localStorage.getItem('tb.skyMotion')==='false'?'off':'on'}catch{document.documentElement.dataset.theme='meteor'}</script>
-<link rel="stylesheet" href="app.css?v=24">
+<link rel="stylesheet" href="app.css?v=25">
 <title>Tunebox</title>
 </head>
 <body>
@@ -73,12 +73,16 @@
 
 <div id="sheet" class="sheet hidden"></div>
 <div id="toast" class="toast"></div>
+<div id="queueAnnounce" class="sr-only" role="status" aria-live="polite"></div>
 </div>
 <audio id="audio" preload="auto" playsinline></audio>
 <input type="file" id="filepick" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg" multiple hidden>
-<script src="viewport.js?v=24"></script>
-<script src="app.js?v=24"></script>
-<script src="glass.js?v=24"></script>
-<script src="interactions.js?v=24"></script>
+<script src="viewport.js?v=25"></script>
+<script src="library.js?v=25"></script>
+<script src="appearance.js?v=25"></script>
+<script src="queue.js?v=25"></script>
+<script src="app.js?v=25"></script>
+<script src="glass.js?v=25"></script>
+<script src="interactions.js?v=25"></script>
 </body>
 </html>

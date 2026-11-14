@@ -71,6 +71,33 @@ dock mode. Navigation replaces the old scroll surface so its deceleration cannot
 move a newly opened page. Audius and Jamendo UI, search calls and home requests
 are removed. Saved files, playlists and cached audio are preserved.
 
+Version 25 adds:
+
+- **Queue editing:** drag future songs by their handles, use the handle menu or
+  arrow keys, and swipe left to reveal Remove (a full swipe removes directly).
+  The current song stays protected. Manual edits persist with the Play next count
+  and never restart playback. Now playing and the next song are labeled separately.
+- **Albums and artists:** Library groups owned music by its metadata, supports
+  compilation album artists, and orders tracks by disc/track tags when available.
+  Unknown album names are grouped per artist. Back navigation returns to the
+  previous collection. Cards keep a track reference so late metadata matches
+  cannot break links. MP3 imports now retain album artist, disc and track tags.
+- **Home:** Continue Listening, recent songs, albums containing favorites,
+  playlists and a shorter recently-added section, with reduced header spacing
+  once music exists in the library.
+- **Offline playlists:** download eligible Drive songs, count local/saved files,
+  and show real saved counts, pause/resume and retry controls. YouTube stays
+  online. Jobs persist and resume on reopening or reconnection; transient network
+  errors retry on reopening, while sign-in/storage issues remain visible.
+  Shared songs download once. New playlist additions join an existing requested
+  download. Manually removing a download pauses its playlist job; clearing all
+  downloads stops playlist jobs. Current shared audio downloads finish safely
+  when a playlist is paused.
+- **Appearance previews:** theme selection opens a temporary live preview. Apply
+  saves the theme, brightness and animation preference; Cancel restores saved
+  settings. Brightness affects wallpaper layers only. Official artwork credits
+  remain available. All new modules are cached for offline use.
+
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.

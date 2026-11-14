@@ -96,7 +96,7 @@ const S = {
   source: ['youtube', 'mine'].includes(store.get('source', 'mine')) ? store.get('source', 'mine') : 'mine',
   q: '', results: [], searching: false, searchErr: '',
   lists: {},
-  showQueue: false,
+  showQueue: false, libraryTrail: [],
   restorePos: 0,
 };
 // Replace separately pasted client IDs without removing music or library data.
@@ -116,13 +116,15 @@ const settings = {
   lookup: store.get('lookup', true),
   appearance: APPEARANCES.includes(store.get('appearance', 'meteor')) ? store.get('appearance', 'meteor') : 'meteor',
   skyMotion: store.get('skyMotion', true),
+  wallpaperBrightness: Math.max(35, Math.min(120, Number(store.get('wallpaperBrightness', 100)) || 100)),
 };
 
-function applyAppearance() {
-  document.documentElement.dataset.theme = settings.appearance;
-  document.documentElement.dataset.skyMotion = settings.skyMotion ? 'on' : 'off';
-  $('meta[name="theme-color"]').content = { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[settings.appearance] || '#101012';
-  const wallpaper = $('#animeWallpaper'), src = WALLPAPERS[settings.appearance];
+function applyAppearance(theme = settings.appearance, brightness = settings.wallpaperBrightness, motion = settings.skyMotion) {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.setProperty('--wallpaper-brightness', brightness / 100);
+  document.documentElement.dataset.skyMotion = motion ? 'on' : 'off';
+  $('meta[name="theme-color"]').content = { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[theme] || '#101012';
+  const wallpaper = $('#animeWallpaper'), src = WALLPAPERS[theme];
   if (src) { if (wallpaper.getAttribute('src') !== src) wallpaper.src = src; }
   else wallpaper.removeAttribute('src');
 }
@@ -295,13 +297,15 @@ async function pumpDl() {
   dlBusy = true;
   while (dlQueue.length) {
     const t = dlQueue.shift();
-    try { await doCache(t); }
+    try { await doCache(t); notePlaylistDownload(t.id, null); }
     catch (e) {
       console.warn('save failed', t.title, e);
+      notePlaylistDownload(t.id, e);
       if (e && e.name === 'QuotaExceededError') toast('Phone storage full — remove some downloads');
-      if (e && e.message === 'DRIVE_AUTH') dlQueue.splice(0).forEach(x => S.downloading.delete(x.id));
+      if (e && (e.message === 'DRIVE_AUTH' || e.name === 'QuotaExceededError')) dlQueue.splice(0).forEach(x => { S.downloading.delete(x.id); notePlaylistDownload(x.id, e); });
     }
     S.downloading.delete(t.id);
+    refreshPlaylistDownloads();
     refreshRows();
     renderPlayer();
   }
@@ -340,6 +344,7 @@ function doCache(t, { store: doStore = true } = {}) {
       if (c.art && !c.hasArt) queueArtworkSave(c);
       Object.assign(c, { saved: Date.now(), size: buf.byteLength });
       S.cached.add(t.id);
+      notePlaylistDownload(t.id, null);
       requestPersist();
     }
     await saveTrack(c);
@@ -424,6 +429,7 @@ async function applyTags(c, blob) {
   if (tags.title) { c.title = tags.title; c.named = 'tags'; }
   if (tags.artist) c.artist = tags.artist;
   if (tags.album) c.album = tags.album;
+  for (const key of ['albumArtist', 'trackNumber', 'discNumber']) if (tags[key]) c[key] = tags[key];
   if (tags.pic) {
     try {
       const d = tags.pic.data;
@@ -441,6 +447,7 @@ async function getBlob(id) {
   return r ? new Blob([r.buf], { type: r.type }) : null;
 }
 async function removeDownload(t) {
+  for (const p of S.playlists) if (p.ids.includes(t.id) && playlistDownloadJobs.has(p.id)) pausePlaylistDownload(p.id);
   await DB.del('blobs', t.id);
   await DB.del('blobs', t.id + '#art');
   S.cached.delete(t.id);
@@ -448,6 +455,7 @@ async function removeDownload(t) {
   const c = canon(t);
   c.saved = 0; c.size = 0; c.hasArt = false;
   await saveTrack(c);
+  refreshPlaylistDownloads();
 }
 let persistAsked = false;
 function requestPersist() {
@@ -812,7 +820,7 @@ function observeVisibleCovers() {
     }, { root: pageScroll, rootMargin: '160px 0px' });
   }
   coverObserver.disconnect(); observedCovers.clear(); visibleCoverIds.clear();
-  $$('#view .row, #view .card, #view .recent-tile').forEach(el => coverObserver.observe(el));
+  $$('#view .row, #view .card, #view .recent-tile, #view .artist-card, #view .album-detail, #view .collection-heading, #view .continue-card').forEach(el => coverObserver.observe(el));
 }
 async function lookupOne(c) {
   if (!S.tracks.has(c.id)) return;
@@ -864,6 +872,8 @@ async function lookupOne(c) {
     c.metadataSource = best.catalogSource || 'itunes';
     c.metadataUrl = best.sourceUrl || best.trackViewUrl || '';
     if ((!c.album || c.named !== 'tags') && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
+    for (const key of ['trackNumber', 'discNumber']) if (!c[key] && best[key]) c[key] = best[key];
+    if (!c.albumArtist && best.collectionArtistName) c.albumArtist = best.collectionArtistName;
     if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
     refreshLookupTrack(c); // Show the cover immediately; storing its offline copy is optional.
     if (c.art && !c.hasArt) queueArtworkSave(c);
@@ -1131,13 +1141,14 @@ function addToQueue(t) {
 }
 function saveQueue() {
   const slim = t => ({ id: t.id, source: t.source, rid: t.rid, title: t.title, artist: t.artist, album: t.album, duration: t.duration, art: t.art, audio: t.audio });
-  store.set('queue', { q: S.queue.map(slim), qi: S.qi, pos: audio.currentTime || 0 });
+  store.set('queue', { q: S.queue.map(slim), qi: S.qi, pn: S.pn, pos: hasRealSrc() || (curIsYT() && ytLoaded()) ? engTime() : S.restorePos || 0 });
 }
 function restoreQueue() {
   const s = store.get('queue', null);
   if (!s || !s.q || !s.q.length) return;
   S.queue = s.q.map(t => S.tracks.get(t.id) || t);
-  S.qi = Math.min(s.qi, S.queue.length - 1);
+  S.qi = Math.max(0, Math.min(Number(s.qi) || 0, S.queue.length - 1));
+  S.pn = Math.max(0, Math.min(Number(s.pn) || 0, S.queue.length - S.qi - 1));
   S.restorePos = s.pos || 0;
 }
 
@@ -1204,6 +1215,7 @@ function dur() {
   return isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (t && t.duration) || 0;
 }
 window.addEventListener('online', () => {
+  resumePlaylistDownloads();
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
@@ -1215,6 +1227,7 @@ window.addEventListener('offline', () => { document.body.classList.add('offline'
 document.addEventListener('visibilitychange', () => {
   document.documentElement.classList.toggle('sky-paused', document.hidden);
   if (document.hidden) return;
+  resumePlaylistDownloads();
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
   prioritizeVisibleCovers(); pumpArtworkSaves();
 });
@@ -1287,7 +1300,7 @@ async function readTags(file) {
     let p = 0;
     if (ver >= 3 && (flags & 0x40)) p = ver === 4 ? syncsafe(b, 0) : be32(b, 0) + 4;
     const v22 = ver === 2, hl = v22 ? 6 : 10, il = v22 ? 3 : 4;
-    const map = v22 ? { TT2: 'title', TP1: 'artist', TAL: 'album' } : { TIT2: 'title', TPE1: 'artist', TALB: 'album' };
+    const map = v22 ? { TT2: 'title', TP1: 'artist', TP2: 'albumArtist', TAL: 'album', TRK: 'trackNumber', TPA: 'discNumber' } : { TIT2: 'title', TPE1: 'artist', TPE2: 'albumArtist', TALB: 'album', TRCK: 'trackNumber', TPOS: 'discNumber' };
     while (p + hl <= b.length) {
       const id = String.fromCharCode(...b.subarray(p, p + il));
       if (!/^[A-Z0-9]+$/.test(id)) break;
@@ -1336,7 +1349,7 @@ async function importFiles(files) {
       const fromName = nameFromFile(f.name, []);
       const t = {
         id, source: 'local', title: tags.title || fromName.title, artist: tags.artist || fromName.artist,
-        album: tags.album || '', named: tags.title ? 'tags' : '',
+        album: tags.album || '', albumArtist: tags.albumArtist || '', trackNumber: tags.trackNumber || '', discNumber: tags.discNumber || '', named: tags.title ? 'tags' : '',
         duration: await probeDuration(f), hasArt, added: Date.now(), saved: Date.now(), size: buf.byteLength, fname: f.name,
       };
       await saveTrack(t);
@@ -1387,11 +1400,15 @@ async function addToPlaylist(p, t) {
   await saveTrack(c);
   p.ids.push(c.id);
   await DB.put('playlists', p);
+  queuePlaylistJob(p);
   toast('Added to ' + p.name);
 }
 
 /* ---------------- UI: icons ---------------- */
 const ICONS = {
+  album: ['s', '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/>'],
+  artist: ['s', '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>'],
+  grip: ['s', '<path d="M7 8h10M7 12h10M7 16h10"/>'],
   check: ['s', '<path d="m5 12 4 4L19 6"/>'],
   music: ['s', '<path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>'],
   home: ['f', '<path d="M12 3 3 10.2V21h6.5v-6h5v6H21V10.2z"/>'],
@@ -1438,38 +1455,7 @@ function rows(list, arr, act) {
 function isIOS() { return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
 function isStandalone() { return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; }
 
-function viewHome() {
-  const all = [...S.tracks.values()];
-  const mine = all.filter(t => t.source === 'local' || t.source === 'drive');
-  const recent = all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6);
-  const added = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 8);
-  const saved = all.filter(t => S.cached.has(t.id) && t.source !== 'local').length;
-  const liked = all.filter(t => t.liked).length;
-  S.lists.recentH = recent;
-  S.lists.homeMusic = added;
-  const coverCard = (t, i, list) => `<button class="card" data-act="play" data-list="${list}" data-i="${i}">${art(t, 'card-art')}<span class="t">${esc(t.title)}</span><span class="a">${esc(t.artist)}</span></button>`;
-  let h = `<div class="forest-scene" aria-hidden="true"><img src="assets/white-forest-photo.webp" alt="" decoding="async" fetchpriority="high"></div><header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
-  h += `<div class="home-shortcuts"><button data-act="open" data-type="liked"><span class="shortcut-art favorite">${icon('heartOn')}</span><span>Favorites<small>${liked} song${liked === 1 ? '' : 's'}</small></span></button><button data-act="open" data-type="offline"><span class="shortcut-art saved">${icon('download')}</span><span>Downloads<small>${saved} on this device</small></span></button></div>`;
-  if (!mine.length) {
-    h += `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>${settings.gClientId ? 'Connect Google Drive to load the songs in your Tunebox folder.' : 'Add music from Google Drive or choose files from this device.'}</p><div class="setup-actions"><button class="btn primary" data-act="${settings.gClientId ? 'gd-sync' : 'tab'}"${settings.gClientId ? '' : ' data-tab="settings"'}>${settings.gClientId ? 'Connect & sync' : 'Connect Google Drive'}</button><button class="btn" data-act="import">Add files</button></div></section>`;
-  }
-  if (recent.length) {
-    h += `<h2>Jump back in</h2><div class="recent-grid">${recent.map((t, i) => `<button class="recent-tile" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'art')}<span class="t">${esc(t.title)}</span></button>`).join('')}</div>`;
-  }
-  if (added.length) {
-    h += `<h2>Recently added<button class="section-link" data-act="tab" data-tab="library">See all</button></h2><div class="album-grid">${added.map((t, i) => coverCard(t, i, 'homeMusic')).join('')}</div>`;
-  }
-  if (S.playlists.length) {
-    h += `<h2>Your playlists<button class="section-link" data-act="new-pl">New playlist</button></h2><div class="cards">${S.playlists.map(p => {
-      const t = p.ids.map(id => S.tracks.get(id)).find(Boolean);
-      return `<button class="card playlist-card" data-act="open" data-type="pl" data-id="${esc(p.id)}">${t ? art(t, 'card-art') : `<span class="card-art playlist-placeholder">${icon('list')}</span>`}<span class="t">${esc(p.name)}</span><span class="a">${p.ids.length} songs</span></button>`;
-    }).join('')}</div>`;
-  }
-  if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) {
-    h += `<div class="banner"><div>For full-screen listening, use Safari's Share menu and choose <b>Add to Home Screen</b>.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
-  }
-  return h;
-}
+function viewHome() { return renderPersonalHome(); }
 
 function viewSearch() {
   return `<h1>Search<span class="offline-pill">Offline</span></h1>
@@ -1531,6 +1517,10 @@ async function doSearch() {
 function listFor(sub) {
   const all = [...S.tracks.values()];
   switch (sub.type) {
+    case 'album': {
+      const album = resolveMusicCollection(musicCollections().albums, sub);
+      return album ? { title: album.title, arr: album.tracks, subtitle: album.artist, cover: album.cover } : null;
+    }
     case 'liked': return { title: 'Liked songs', arr: all.filter(t => t.liked).sort((a, b) => b.liked - a.liked), empty: 'Tap the heart on any song to add it here.' };
     case 'offline': return { title: 'Downloaded', arr: all.filter(t => S.cached.has(t.id) && t.source !== 'local').sort((a, b) => (b.saved || 0) - (a.saved || 0)), empty: 'Songs save here automatically after you play them.' };
     case 'recent': return { title: 'Recently played', arr: all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 150), empty: 'Nothing played yet.' };
@@ -1550,7 +1540,9 @@ function listFor(sub) {
 }
 function viewLibrary() {
   const all = [...S.tracks.values()];
+  const groups = musicCollections();
   const c = {
+    albums: groups.albums.size, artists: groups.artists.size,
     liked: all.filter(t => t.liked).length,
     offline: all.filter(t => S.cached.has(t.id) && t.source !== 'local').length,
     recent: all.filter(t => t.lastPlayed).length,
@@ -1560,6 +1552,7 @@ function viewLibrary() {
   const item = (type, ic, label) => `<button class="lib-item" data-act="open" data-type="${type}">${icon(ic)}${label}<span class="n">${c[type]}</span></button>`;
   let h = `<h1>Library<span class="offline-pill">Offline</span></h1><p class="library-summary">${all.length} songs &middot; ${S.playlists.length} playlists</p>`
     + (settings.gClientId || c.drive ? item('drive', 'cloud', 'Google Drive') : '')
+    + item('albums', 'album', 'Albums') + item('artists', 'artist', 'Artists')
     + item('liked', 'heartOn', 'Favorites') + item('offline', 'download', 'Downloads')
     + item('recent', 'clock', 'Recently played') + item('local', 'folder', 'My files');
   h += `<h2>Playlists <button class="addpl" data-act="new-pl">+ New</button></h2>`;
@@ -1568,11 +1561,15 @@ function viewLibrary() {
   return h;
 }
 function viewList() {
+  if (['albums', 'artists', 'artist'].includes(S.sub.type)) return viewCollections();
   const L = listFor(S.sub);
   if (!L) { S.sub = null; return viewLibrary(); }
-  const key = S.sub.type === 'pl' ? 'pl:' + S.sub.id : S.sub.type;
-  let h = `<button class="backbar" data-act="back">${icon('back')}Library</button>
+  const key = ['pl', 'album'].includes(S.sub.type) ? S.sub.type + ':' + S.sub.id : S.sub.type;
+  let h = `<button class="backbar" data-act="back">${icon('back')}${libraryBackLabel()}</button>
     <div class="titlebar"><h1>${esc(L.title)}</h1>${L.pl ? `<button class="icon more" data-act="pl-menu" data-id="${esc(L.pl.id)}">${icon('more')}</button>` : ''}</div>`;
+  if (L.cover) h += `<div class="album-detail">${art(L.cover, 'album-detail-art')}<p class="small">${esc(L.subtitle)} · ${L.arr.length} songs</p></div>`;
+  if (L.pl) h += playlistProgressHTML(L.pl);
+  if (S.sub.type === 'offline') h += `<div data-download-jobs>${downloadJobsHTML()}</div>`;
   if (S.sub.type === 'local') h += `<div class="list-head"><button class="btn primary" data-act="import">${icon('plus')}Add music files</button></div>`;
   if (S.sub.type === 'drive' && settings.gClientId) {
     const last = store.get('gdLastSync', 0);
@@ -1587,16 +1584,9 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 24</p>
-  <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
-    <button class="appearance-option" data-act="appearance" data-theme="zoro" aria-pressed="${settings.appearance === 'zoro'}"><span class="appearance-swatch zoro-swatch" aria-hidden="true"></span><span>Zoro · Asura<small>Official character art</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-    <button class="appearance-option" data-act="appearance" data-theme="sophie" aria-pressed="${settings.appearance === 'sophie'}"><span class="appearance-swatch sophie-swatch" aria-hidden="true"></span><span>Sophie · Stars<small>Howl's Moving Castle</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-    <button class="appearance-option meteor-option" data-act="appearance" data-theme="meteor" aria-pressed="${settings.appearance === 'meteor'}"><span class="appearance-swatch meteor-swatch" aria-hidden="true"></span><span>Meteor night<small>A little after dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-    <button class="appearance-option" data-act="appearance" data-theme="forest" aria-pressed="${settings.appearance === 'forest'}"><span class="appearance-swatch forest-swatch" aria-hidden="true"></span><span>White forest<small>Light & quiet</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-    <button class="appearance-option" data-act="appearance" data-theme="dark" aria-pressed="${settings.appearance === 'dark'}"><span class="appearance-swatch dark-swatch" aria-hidden="true"></span><span>Original<small>Classic dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-  </div>${['meteor', 'zoro', 'sophie'].includes(settings.appearance) ? `<label class="set-row sky-motion-setting"><span>Animate background<small>${settings.appearance === 'zoro' ? 'Violet sparks drift past the artwork.' : 'A few falling stars across the night sky.'}</small></span><input type="checkbox" class="switch" id="skyMotion" ${settings.skyMotion ? 'checked' : ''}></label>` : ''}
-  ${WALLPAPERS[settings.appearance] ? `<p class="small wallpaper-credit">Artwork: <a href="${settings.appearance === 'zoro' ? 'https://opbr-en.bn-ent.net/character/detail/0002.html' : 'https://www.ghibli.jp/works/howl/'}" target="_blank" rel="noopener">${settings.appearance === 'zoro' ? 'Bandai Namco · 1220 × 1220' : 'Studio Ghibli · 1920 × 1038'}</a></p>` : settings.appearance === 'forest' ? `<p class="small wallpaper-credit">Photo: <a href="https://unsplash.com/photos/photo-of-snow-coated-birch-trees-9erhhb8WwqI" target="_blank" rel="noopener">Unsplash · 3840 × 2604</a></p>` : ''}</section>
-  <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 25</p>
+  ${appearanceSettingsHTML()}
+  <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Drive songs you play are kept on this phone. YouTube videos stay online.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
     <label class="small" for="gFolder">Music folder in Google Drive</label>
@@ -1772,6 +1762,8 @@ function renderPlayer() {
   renderQueue();
 }
 function renderQueue() {
+  if (queueGestureActive() && S.showQueue && $('#np').classList.contains('open')) return;
+  cancelQueueGesture();
   const q = $('#npQueue');
   const key = `${curTrack()?.id || ''}|${S.qi}`;
   const position = !q.classList.contains('hidden') && q.dataset.current === key ? q.scrollTop : 0;
@@ -1785,15 +1777,14 @@ function renderQueue() {
   q.classList.toggle('hidden', !S.showQueue);
   if (!S.showQueue) return;
   S.lists.queue = S.queue;
-  const up = S.queue.length - S.qi - 1;
-  q.innerHTML = `<div class="small" style="margin:2px 0 6px">Up next · ${up} song${up === 1 ? '' : 's'}${S.shuffle ? ' · shuffled' : ''}</div>`
-    + `<div class="list">${S.queue.map((t, i) => (i >= S.qi ? row('queue', t, i, 'q-play') : '')).join('')}</div>`;
+  q.innerHTML = renderQueueContent();
   q.scrollTop = position;
 }
 let overlayScroll = null, playerReturnFocus = null, sheetReturnFocus = null;
 function syncOverlayState() {
   const playerOpen = $('#np').classList.contains('open'), sheetOpen = !$('#sheet').classList.contains('hidden');
-  const open = playerOpen || sheetOpen, compact = document.body.classList.contains('dock-compact');
+  const previewOpen = !!$('#themePreview');
+  const open = playerOpen || sheetOpen || previewOpen, compact = document.body.classList.contains('dock-compact');
   if (open && overlayScroll === null) {
     overlayScroll = pageScroll.scrollTop;
     document.body.classList.add('overlay-open');
@@ -1808,11 +1799,11 @@ function syncOverlayState() {
   $('#mainTabs').setAttribute('aria-hidden', String(open || compact));
   $('#compactNav').inert = open || !compact;
   $('#compactNav').setAttribute('aria-hidden', String(open || !compact));
-  $('#np').inert = !playerOpen || sheetOpen;
-  $('#np').setAttribute('aria-hidden', String(!playerOpen || sheetOpen));
+  $('#np').inert = !playerOpen || sheetOpen || previewOpen;
+  $('#np').setAttribute('aria-hidden', String(!playerOpen || sheetOpen || previewOpen));
   document.body.classList.toggle('sheet-open', sheetOpen);
   document.documentElement.classList.toggle('player-open', playerOpen);
-  $('meta[name="theme-color"]').content = playerOpen ? '#202023' : { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[settings.appearance] || '#101012';
+  $('meta[name="theme-color"]').content = playerOpen ? '#202023' : { forest: '#f1f3ef', meteor: '#101522', zoro: '#18131b', sophie: '#171827' }[document.documentElement.dataset.theme] || '#101012';
 }
 function openNP() {
   playerReturnFocus = document.activeElement;
@@ -1820,6 +1811,7 @@ function openNP() {
   $('#npTop button').focus({ preventScroll: true });
 }
 function closeNP() {
+  cancelQueueGesture();
   $('#np').classList.remove('open');
   syncOverlayState();
   if (playerReturnFocus?.isConnected && !playerReturnFocus.closest('[inert]')) playerReturnFocus.focus({ preventScroll: true });
@@ -1898,13 +1890,7 @@ function trackMenu(t, ctx = {}) {
     if (p) items.push({ label: 'Remove from this playlist', danger: true, fn: async () => { p.ids.splice(ctx.i, 1); await DB.put('playlists', p); render(); } });
   }
   if (ctx.list === 'queue' && ctx.i !== S.qi) {
-    items.push({ label: 'Remove from queue', danger: true, fn: () => {
-      S.queue.splice(ctx.i, 1);
-      if (ctx.i < S.qi) S.qi--;
-      else if (ctx.i <= S.qi + S.pn && S.pn > 0) S.pn--;
-      if (S.orig) { const k = S.orig.findIndex(x => x.id === t.id); if (k >= 0) S.orig.splice(k, 1); }
-      saveQueue(); renderQueue();
-    } });
+    items.push({ label: 'Remove from queue', danger: true, fn: () => removeQueuedTrack(ctx.i) });
   }
   if (t.source === 'local') {
     items.push({ label: 'Delete from phone', danger: true, fn: async () => {
@@ -1927,9 +1913,10 @@ function playlistPicker(t) {
 function playlistMenu(p) {
   sheet(`<div class="t">${esc(p.name)}</div>`, [
     { label: 'Rename', fn: async () => { const n = (prompt('New name', p.name) || '').trim(); if (n) { p.name = n; await DB.put('playlists', p); render(); } } },
-    { label: 'Save all for offline', fn: () => { p.ids.map(id => S.tracks.get(id)).filter(Boolean).forEach(t => cacheTrack(t)); toast('Saving playlist…'); } },
+    { label: 'Download playlist', fn: () => { downloadPlaylist(p); if (S.sub?.type === 'pl') render(); } },
     { label: 'Delete playlist', danger: true, fn: async () => {
       if (!confirm(`Delete playlist "${p.name}"? Songs stay in your library.`)) return;
+      pausePlaylistDownload(p.id); playlistDownloadJobs.delete(p.id); savePlaylistJobs();
       await DB.del('playlists', p.id);
       S.playlists = S.playlists.filter(x => x !== p);
       S.sub = null; render();
@@ -1938,16 +1925,18 @@ function playlistMenu(p) {
 }
 
 /* ---------------- Events ---------------- */
-const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev']);
+const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev', 'resume-current']);
 const actions = {
-  appearance: el => {
-    settings.appearance = APPEARANCES.includes(el.dataset.theme) ? el.dataset.theme : 'meteor';
-    store.set('appearance', settings.appearance);
-    applyAppearance(); render();
-    $(`[data-act="appearance"][data-theme="${settings.appearance}"]`)?.focus({ preventScroll: true });
-  },
+  appearance: el => openThemePreview(el.dataset.theme),
+  'theme-cancel': () => closeThemePreview(false),
+  'theme-apply': () => closeThemePreview(true),
+  'download-pl': el => downloadPlaylist(S.playlists.find(p => p.id === el.dataset.id)),
+  'pause-pl': el => pausePlaylistDownload(el.dataset.id),
+  'queue-remove': el => removeQueuedTrack(el.dataset.i),
+  'queue-move': el => queueMoveMenu(el.dataset.i),
+  'resume-current': () => { openNP(); if (!engPlaying()) togglePlay(); },
   tab: el => {
-    resetPageScroll(); S.tab = el.dataset.tab; S.sub = null; render();
+    resetPageScroll(); S.tab = el.dataset.tab; S.sub = null; S.libraryTrail = []; render();
     if (S.tab === 'search' && !S.results.length && !S.searching) doSearch();
     scrollPageTo(0, 0);
   },
@@ -1966,8 +1955,12 @@ const actions = {
   'np-more': () => trackMenu(curTrack(), {}),
   'toggle-queue': () => { S.showQueue = !S.showQueue; renderQueue(); },
   src: el => { resetPageScroll(); S.source = el.dataset.src === 'youtube' ? 'youtube' : 'mine'; store.set('source', S.source); S.results = []; render(); doSearch(); },
-  open: el => { resetPageScroll(); S.tab = 'library'; S.sub = { type: el.dataset.type, id: el.dataset.id }; render(); scrollPageTo(0, 0); },
-  back: () => { resetPageScroll(); S.sub = null; render(); },
+  open: el => {
+    if (S.tab === 'library' && S.sub) S.libraryTrail.push({ ...S.sub });
+    else S.libraryTrail = ['album', 'artist'].includes(el.dataset.type) ? [{ type: el.dataset.type === 'album' ? 'albums' : 'artists' }] : [];
+    resetPageScroll(); S.tab = 'library'; S.sub = { type: el.dataset.type, id: el.dataset.id, reference: el.dataset.reference }; render(); scrollPageTo(0, 0);
+  },
+  back: () => { resetPageScroll(); S.sub = S.libraryTrail.pop() || null; render(); },
   'play-all': el => { const a = S.lists[el.dataset.list]; if (a && a.length) { if (S.shuffle) toggleShuffle(); playList(a, 0); } },
   'shuffle-all': el => {
     const a = S.lists[el.dataset.list];
@@ -2008,6 +2001,7 @@ const actions = {
     const off = [...S.tracks.values()].filter(t => S.cached.has(t.id) && t.source !== 'local');
     if (!off.length) { toast('No downloads to remove'); return; }
     if (!confirm(`Remove ${off.length} downloaded songs from this phone? Likes and playlists are kept.`)) return;
+    stopPlaylistDownloads();
     const c = curTrack();
     for (const t of off) { if (!(c && c.id === t.id && !audio.paused)) await removeDownload(t); }
     toast('Downloads removed');
@@ -2023,6 +2017,8 @@ document.addEventListener('click', e => {
   if (f) { e.preventDefault(); f(el, e); }
 });
 document.addEventListener('input', e => {
+  if (e.target.id === 'wallpaperBrightness') updateWallpaperBrightness(e.target.value);
+  if (e.target.id === 'previewBrightness') updateWallpaperBrightness(e.target.value, true);
   if (e.target.id === 'q') {
     S.q = e.target.value;
     clearTimeout(sTimer);
@@ -2033,6 +2029,7 @@ document.addEventListener('submit', e => {
   if (e.target.id === 'searchForm') { e.preventDefault(); clearTimeout(sTimer); doSearch(); $('#q').blur(); }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'previewMotion' && themePreview) { themePreview.motion = e.target.checked; applyAppearance(themePreview.theme, themePreview.brightness, themePreview.motion); }
   if (e.target.id === 'skyMotion') { settings.skyMotion = e.target.checked; store.set('skyMotion', settings.skyMotion); applyAppearance(); }
   if (e.target.id === 'autoSave') { settings.autoSave = e.target.checked; store.set('autoSave', settings.autoSave); }
   if (e.target.id === 'lookup') {
@@ -2078,6 +2075,7 @@ async function init() {
   if (hadHash && !justConnected && store.get('gdEver', false) && !gdToken()) setTimeout(driveAuthSheet, 300);
   render();
   renderPlayer();
+  restorePlaylistDownloads();
   if (S.tab === 'search') doSearch();
   if (justConnected) {
     // first connect, or more than 6 h since the last sync: refresh the song list

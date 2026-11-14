@@ -21,7 +21,7 @@
   }, { capture: true, passive: true });
   document.addEventListener('touchend', event => {
     const pending = tap; tap = null;
-    if (!pending || pending.moved || !pending.control.isConnected || pending.control.closest('[inert]')) return;
+    if (!pending || pending.moved || document.body.classList.contains('queue-gesturing') || !pending.control.isConnected || pending.control.closest('[inert]')) return;
     const touch = [...event.changedTouches].find(t => t.identifier === pending.id);
     if (!touch || Math.hypot(touch.clientX - pending.x, touch.clientY - pending.y) > 10) return;
     if (event.cancelable) event.preventDefault();
@@ -40,12 +40,14 @@
   document.addEventListener('keydown', event => {
     document.body.classList.remove('touch-input');
     const sheet = document.querySelector('#sheet:not(.hidden) .sheet-card');
+    const preview = document.querySelector('#themePreview');
     const player = document.querySelector('#np.open');
-    const dialog = sheet || player;
+    const dialog = sheet || preview || player;
     if (!dialog) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       if (sheet) document.querySelector('.sheet-btn.cancel').click();
+      else if (preview) preview.querySelector('[data-act="theme-cancel"]').click();
       else document.querySelector('[data-act="close-np"]').click();
     } else if (event.key === 'Tab') {
       const controls = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]')]
