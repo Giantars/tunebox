@@ -11,11 +11,12 @@
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
-<script>try{document.documentElement.dataset.theme=localStorage.getItem('tb.appearance')==='"dark"'?'dark':'forest'}catch{document.documentElement.dataset.theme='forest'}</script>
-<link rel="stylesheet" href="app.css?v=20">
+<script>try{const t=JSON.parse(localStorage.getItem('tb.appearance'));document.documentElement.dataset.theme=['dark','forest','meteor'].includes(t)?t:'meteor';document.documentElement.dataset.skyMotion=localStorage.getItem('tb.skyMotion')==='false'?'off':'on'}catch{document.documentElement.dataset.theme='meteor'}</script>
+<link rel="stylesheet" href="app.css?v=21">
 <title>Tunebox</title>
 </head>
 <body>
+<div class="night-sky" aria-hidden="true"><div class="sky-stars"></div><div class="sky-moon"></div><div class="sky-horizon"></div><div class="meteor-field"><i class="meteor"></i><i class="meteor"></i><i class="meteor"></i><i class="meteor"></i></div></div>
 <main id="view"></main>
 
 <div id="mini" class="mini hidden" data-act="open-np">
@@ -72,7 +73,7 @@
 <div id="toast" class="toast"></div>
 <audio id="audio" preload="auto" playsinline></audio>
 <input type="file" id="filepick" accept="audio/*,.mp3,.m4a,.aac,.wav,.flac,.ogg" multiple hidden>
-<script src="app.js?v=20"></script>
-<script src="glass.js?v=20"></script>
+<script src="app.js?v=21"></script>
+<script src="glass.js?v=21"></script>
 </body>
 </html>

@@ -101,12 +101,14 @@ const settings = {
   gClientId: GOOGLE_CLIENT_ID,
   gFolder: store.get('gFolder', 'Tunebox'),
   lookup: store.get('lookup', true),
-  appearance: store.get('appearance', 'forest') === 'dark' ? 'dark' : 'forest',
+  appearance: ['dark', 'forest', 'meteor'].includes(store.get('appearance', 'meteor')) ? store.get('appearance', 'meteor') : 'meteor',
+  skyMotion: store.get('skyMotion', true),
 };
 
 function applyAppearance() {
   document.documentElement.dataset.theme = settings.appearance;
-  $('meta[name="theme-color"]').content = settings.appearance === 'forest' ? '#f1f3ef' : '#101012';
+  document.documentElement.dataset.skyMotion = settings.skyMotion ? 'on' : 'off';
+  $('meta[name="theme-color"]').content = settings.appearance === 'forest' ? '#f1f3ef' : settings.appearance === 'meteor' ? '#101522' : '#101012';
 }
 applyAppearance();
 
@@ -1233,6 +1235,7 @@ window.addEventListener('online', () => {
 window.addEventListener('offline', () => { document.body.classList.add('offline'); if (S.tab === 'home') render(); });
 
 document.addEventListener('visibilitychange', () => {
+  document.documentElement.classList.toggle('sky-paused', document.hidden);
   if (document.hidden) return;
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
   prioritizeVisibleCovers(); pumpArtworkSaves();
@@ -1613,11 +1616,12 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 20</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 21</p>
   <section class="group appearance-group" aria-labelledby="appearance-heading"><h2 id="appearance-heading" class="set-head">Appearance</h2><div class="appearance-options">
+    <button class="appearance-option meteor-option" data-act="appearance" data-theme="meteor" aria-pressed="${settings.appearance === 'meteor'}"><span class="appearance-swatch meteor-swatch" aria-hidden="true"></span><span>Meteor night<small>A little after dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="forest" aria-pressed="${settings.appearance === 'forest'}"><span class="appearance-swatch forest-swatch" aria-hidden="true"></span><span>White forest<small>Light & quiet</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
     <button class="appearance-option" data-act="appearance" data-theme="dark" aria-pressed="${settings.appearance === 'dark'}"><span class="appearance-swatch dark-swatch" aria-hidden="true"></span><span>Original<small>Classic dark</small></span><span class="appearance-check" aria-hidden="true">${icon('check')}</span></button>
-  </div></section>
+  </div>${settings.appearance === 'meteor' ? `<label class="set-row sky-motion-setting"><span>Animate meteors<small>A few falling stars across the night sky.</small></span><input type="checkbox" class="switch" id="skyMotion" ${settings.skyMotion ? 'checked' : ''}></label>` : ''}</section>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
@@ -1921,7 +1925,7 @@ function playlistMenu(p) {
 const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev']);
 const actions = {
   appearance: el => {
-    settings.appearance = el.dataset.theme === 'dark' ? 'dark' : 'forest';
+    settings.appearance = ['dark', 'forest', 'meteor'].includes(el.dataset.theme) ? el.dataset.theme : 'meteor';
     store.set('appearance', settings.appearance);
     applyAppearance(); render();
     $(`[data-act="appearance"][data-theme="${settings.appearance}"]`)?.focus({ preventScroll: true });
@@ -2017,6 +2021,7 @@ document.addEventListener('submit', e => {
   if (e.target.id === 'searchForm') { e.preventDefault(); clearTimeout(sTimer); doSearch(); $('#q').blur(); }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'skyMotion') { settings.skyMotion = e.target.checked; store.set('skyMotion', settings.skyMotion); applyAppearance(); }
   if (e.target.id === 'autoSave') { settings.autoSave = e.target.checked; store.set('autoSave', settings.autoSave); }
   if (e.target.id === 'lookup') {
     settings.lookup = e.target.checked;

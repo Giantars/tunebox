@@ -30,13 +30,18 @@ register the exact origin and redirect address in Google Cloud.
 
 ## Appearance
 
-Version 20 previews a White forest appearance with a static, locally served image,
-light surfaces and muted pine accents. Settings → Appearance switches between
-White forest and the original dark appearance, and remembers the choice locally.
-The forest image is included in the offline app shell. It uses no scroll-time
-image processing. Only the Library tab lowers the bottom dock; other tabs retain
-their previous safe-area inset. The image prompt is in
-`assets/white-forest.prompt.txt`.
+Settings → Appearance switches between Meteor night, White forest and the original
+dark appearance, and remembers the choice locally. Version 21 adds Meteor night:
+a static illustrated mountain sky, crescent moon and four staggered meteor trails.
+Only the trails' transforms and opacity animate; there is no animation loop in
+JavaScript or scroll-time image processing. Meteors pause when the app is hidden,
+respect Reduce Motion, and can be disabled with Animate meteors in Settings.
+New installs preview Meteor night; saved theme choices remain selected.
+
+White forest uses a locally served photograph, light surfaces and muted pine
+accents. Both scene assets are included in the offline app shell. Only the Library
+tab lowers the bottom dock; other tabs retain their previous safe-area inset.
+The forest image prompt is in `assets/white-forest.prompt.txt`.
 
 ## Covers and song names
 

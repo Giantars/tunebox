@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" fill="none">
+  <path fill="#303047" d="M0 330 120 232 185 271 327 161 420 246 505 211 622 303 772 188 898 278 1000 214V600H0Z"/>
+  <path fill="#23283a" d="m0 376 122-71 133 64 137-81 171 102 122-58 159 48 156-97v317H0Z"/>
+  <path fill="#171e2d" d="m0 429 145-47 164 64 182-33 181 44 168-64 160 35v172H0Z"/>
+  <g fill="#121b28">
+    <path id="pine" d="m51 302-14 28h8l-18 30h10l-22 38h31v27h10v-27h31l-23-38h10l-18-30h8Z"/>
+    <use href="#pine" transform="translate(49 24) scale(.9)"/>
+    <use href="#pine" transform="translate(95 92) scale(.72)"/>
+    <use href="#pine" transform="translate(-9 65) scale(.8)"/>
+    <use href="#pine" transform="translate(830 -12) scale(1.15)"/>
+    <use href="#pine" transform="translate(905 54) scale(1.0)"/>
+    <use href="#pine" transform="translate(787 103) scale(.75)"/>
+    <path d="M0 424q200-48 405 22t595-22v176H0Z"/>
+  </g>
+</svg>

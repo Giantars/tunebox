@@ -392,3 +392,55 @@ html[data-theme="forest"] input.switch:checked{background:var(--ac)}
 html[data-theme="forest"] .np{--ac:#ff8b9f;--bg:#151517;--line:#ffffff12}
 @media(hover:hover){html[data-theme="forest"] .home-shortcuts>button:hover{background:#fff}html[data-theme="forest"] .lib-item:hover,html[data-theme="forest"] .row:hover{background:#34584005}}
 @media(prefers-reduced-transparency:reduce){html[data-theme="forest"] .tabs,html[data-theme="forest"] .mini,html[data-theme="forest"] .compact-nav>button{background:#f5f8f0;backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* Meteor night: a static illustrated sky with four small, compositor-only trails. */
+.night-sky{display:none;position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:-1;contain:strict}
+html[data-theme="meteor"]{color-scheme:dark;--bg:#101522;--s1:#1e2436e8;--s2:#2b3144;--line:#ced5ff14;--tx:#ececf4;--mu:#a7aec5;--ac:#eab7a2;--ok:#9acbb2;--bad:#ff9aaf}
+html[data-theme="meteor"] body{background:transparent;isolation:isolate;min-height:100vh}
+html[data-theme="meteor"] .night-sky{display:block;background:radial-gradient(ellipse 100% 45% at 78% 40%,#b17d843d,transparent 80%),linear-gradient(180deg,#101725 0%,#252c48 45%,#44415b 64%,#171e2d 100%)}
+.sky-stars{position:absolute;inset:0 0 22%;opacity:.65;background:radial-gradient(circle at 12% 7%,#eee3d8 0 1px,transparent 1.5px),radial-gradient(circle at 76% 12%,#eee3d8 0 .8px,transparent 1.4px),radial-gradient(circle at 44% 18%,#eee3d8 0 .6px,transparent 1.2px),radial-gradient(circle at 88% 26%,#eee3d8 0 1px,transparent 1.5px),radial-gradient(circle at 25% 31%,#eee3d8 0 .7px,transparent 1.3px),radial-gradient(circle at 55% 9%,#eee3d8 0 .9px,transparent 1.5px),radial-gradient(circle at 64% 37%,#eee3d8 0 .6px,transparent 1.1px),radial-gradient(circle at 8% 44%,#eee3d8 0 .7px,transparent 1.4px),radial-gradient(circle at 40% 48%,#eee3d8 0 .6px,transparent 1.1px),radial-gradient(circle at 92% 6%,#eee3d8 0 .7px,transparent 1.3px),radial-gradient(circle at 34% 3%,#eee3d8 0 .6px,transparent 1.1px),radial-gradient(circle at 18% 22%,#eee3d8 0 .6px,transparent 1.1px)}
+.sky-moon{position:absolute;top:16%;right:17%;width:34px;height:34px;border-radius:50%;background:#eee3cf;box-shadow:0 0 38px 10px #eddbc00b}
+.sky-moon::after{content:'';position:absolute;inset:-3px -7px 7px 9px;border-radius:50%;background:#272d44}
+.sky-horizon{position:absolute;left:0;right:0;bottom:0;height:65%;background:url('assets/meteor-horizon.svg') center bottom/auto 100% no-repeat}
+.meteor-field{position:absolute;inset:0}
+.meteor{position:absolute;top:var(--meteor-y,8%);left:var(--meteor-x,86%);width:110px;height:1.5px;border-radius:100%;background:linear-gradient(90deg,#fff3df,#ddc4e47a 20%,#bba9dc20 65%,transparent);opacity:0;transform:translate3d(0,0,0) rotate(-38deg);animation:meteor-fall var(--meteor-period,19s) var(--meteor-delay,0s) linear infinite}
+.meteor:nth-child(2){--meteor-x:104%;--meteor-y:28%;--meteor-period:23s;--meteor-delay:5s;width:84px}
+.meteor:nth-child(3){--meteor-x:59%;--meteor-y:4%;--meteor-period:29s;--meteor-delay:11s;width:68px}
+.meteor:nth-child(4){--meteor-x:92%;--meteor-y:42%;--meteor-period:31s;--meteor-delay:17s;width:92px}
+@keyframes meteor-fall{0%{opacity:0;transform:translate3d(0,0,0) rotate(-38deg)}1%{opacity:.8}6%{opacity:.65}9%,100%{opacity:0;transform:translate3d(-330px,258px,0) rotate(-38deg)}}
+html:not([data-theme="meteor"]) .meteor,html[data-sky-motion="off"] .meteor{animation:none;opacity:0}
+.sky-paused .meteor{animation-play-state:paused}
+.meteor-option{grid-column:1/-1;display:grid;grid-template-columns:100px 1fr 20px;align-items:center;gap:12px;padding:8px}
+.meteor-option .appearance-swatch{height:72px;margin:0}
+.meteor-option .appearance-check{position:static}
+.meteor-swatch{background:radial-gradient(circle at 72% 24%,#f0dcc5 0 4px,transparent 4.5px),radial-gradient(circle at 22% 16%,#f0dcc5 0 1px,transparent 1.4px),linear-gradient(155deg,#111a2a,#61526e)}
+.meteor-swatch::before{content:'';position:absolute;width:38px;height:1px;top:25px;left:15px;background:linear-gradient(90deg,#fff0dd,transparent);transform:rotate(-38deg)}
+.meteor-swatch::after{border-color:#e3dbff2e;background:#ffffff12}
+.sky-motion-setting{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+html[data-theme="meteor"] .home-heading{min-height:195px;align-items:flex-start;margin-bottom:8px}
+html[data-theme="meteor"] .home-heading h1{font-size:42px;font-weight:650;letter-spacing:-1.5px}
+html[data-theme="meteor"] .app-label{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#bbc0d4}
+html[data-theme="meteor"] .profile-button{color:#d6d7e5;background:#252c46a6;border-color:#e4d5ed20}
+html[data-theme="meteor"] .home-shortcuts>button{border-radius:16px;padding:15px 12px;background:#20273be8;border:1px solid #e4d5ed0e}
+html[data-theme="meteor"] .shortcut-art{background:#57404d;color:#e9bec1}
+html[data-theme="meteor"] .shortcut-art.saved{background:#314541;color:#b3d3c3}
+html[data-theme="meteor"] .library-setup{background:#202639eb;border-color:#e4d5ed12;border-radius:20px}
+html[data-theme="meteor"] .setup-heading>.ic{color:#dfbda8}
+html[data-theme="meteor"] .group{background:#1b2335f2;border:1px solid #d4d0f012}
+html[data-theme="meteor"] .btn{background:#313950;color:#e4e4ef}
+html[data-theme="meteor"] .btn.primary{background:#e5baa6;color:#252032}
+html[data-theme="meteor"] .field,html[data-theme="meteor"] .searchbox{background:#141d2f;border-color:#d4d0f012}
+html[data-theme="meteor"] .field:focus,html[data-theme="meteor"] .searchbox:focus{box-shadow:0 0 0 2px #e5baa640}
+html[data-theme="meteor"] .seg button.on{background:#36415a}
+html[data-theme="meteor"] .tabs,html[data-theme="meteor"] .mini,html[data-theme="meteor"] .compact-nav>button{background:#242d43c9;border-color:#e5def12b;box-shadow:0 5px 20px #0509163d}
+html[data-theme="meteor"] .tabs button{color:#aeb6d0}
+html[data-theme="meteor"] .tabs button.on,html[data-theme="meteor"] .tabs.is-touched button.scrub-target{color:#f3c8ae}
+html[data-theme="meteor"] .tabs.is-touched button.on{color:#aeb6d0}
+html[data-theme="meteor"] .tab-lens{background:#c5b1d816}
+html[data-theme="meteor"] .dock-shade{background:linear-gradient(transparent,#10152244 45%,#101522a8)}
+html[data-theme="meteor"] .sheet-card{background:#222b40;border-color:#e4d5ed20}
+html[data-theme="meteor"] .toast{background:#e6ccbc;color:#252032}
+html[data-theme="meteor"] .np{--ac:#f3c8ae}
+@media(hover:hover){html[data-theme="meteor"] .home-shortcuts>button:hover{background:#2c354c}}
+@media(prefers-reduced-motion:reduce){.meteor{animation:none!important;opacity:0!important}}
+@media(prefers-reduced-transparency:reduce){html[data-theme="meteor"] .tabs,html[data-theme="meteor"] .mini,html[data-theme="meteor"] .compact-nav>button{background:#242d43;backdrop-filter:none;-webkit-backdrop-filter:none}}
