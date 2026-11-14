@@ -1584,7 +1584,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 25</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 26</p>
   ${appearanceSettingsHTML()}
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Drive songs you play are kept on this phone. YouTube videos stay online.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>

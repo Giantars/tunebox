@@ -98,6 +98,11 @@ Version 25 adds:
   settings. Brightness affects wallpaper layers only. Official artwork credits
   remain available. All new modules are cached for offline use.
 
+Version 26 hides navigation, the mini-player and dock shading while the Search
+keyboard is open. It follows visual viewport changes, restores the dock when the
+keyboard is dismissed even if Search remains focused, and keeps desktop search
+navigation visible when no software keyboard appears.
+
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.

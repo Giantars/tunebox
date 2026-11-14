@@ -1,7 +1,7 @@
 // App-shell cache so Tunebox opens instantly and works offline.
 // Songs are NOT cached here — they live in IndexedDB (see app.js).
-const VERSION = 'tunebox-v25';
-const SHELL = ['./', 'index.html', 'app.css?v=25', 'app.js?v=25', 'glass.js?v=25', 'interactions.js?v=25', 'viewport.js?v=25', 'library.js?v=25', 'appearance.js?v=25', 'queue.js?v=25', 'manifest.webmanifest', 'assets/white-forest-photo.webp', 'assets/meteor-horizon.svg', 'assets/zoro-official.webp', 'assets/sophie-stars.webp',
+const VERSION = 'tunebox-v26';
+const SHELL = ['./', 'index.html', 'app.css?v=26', 'app.js?v=26', 'glass.js?v=26', 'interactions.js?v=26', 'viewport.js?v=26', 'library.js?v=26', 'appearance.js?v=26', 'queue.js?v=26', 'manifest.webmanifest', 'assets/white-forest-photo.webp', 'assets/meteor-horizon.svg', 'assets/zoro-official.webp', 'assets/sophie-stars.webp',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

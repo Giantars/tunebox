@@ -613,3 +613,7 @@ html[data-theme="forest"] body::before,.forest-scene>img,.preview-forest{filter:
 html:is([data-theme="zoro"],[data-theme="sophie"]) body.theme-preview-open .anime-shade{background:linear-gradient(#0c091640,transparent 32%,#0c09162b 58%,#0c0916bd)}
 @media(prefers-reduced-motion:reduce){.queue-row{transition:none}}
 html[data-theme="forest"] .continue-card{background:#fffffff0}
+
+/* Give search results the keyboard's remaining space without a floating dock. */
+body.search-keyboard #mainTabs,body.search-keyboard #mini,body.search-keyboard #compactNav,body.search-keyboard .dock-shade{display:none}
+body.search-keyboard #view{padding-bottom:20px}
