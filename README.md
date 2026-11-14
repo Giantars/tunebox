@@ -56,6 +56,11 @@ The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a
 touch highlight and direct horizontal tab scrubbing. Pointer gestures activate
 once on release, tolerate small finger movements, and cancel when released outside
 the dock. Keyboard and assistive-technology clicks use the standard button.
+Touch controls cancel native momentum scrolling and handle release directly,
+including when the browser suppresses its normal click. This applies to the
+compact player and side buttons as well as the full tab bar. The tab lens
+stretches with finger velocity and settles on release; folding contracts the bar
+toward the compact controls. All animation is disabled with reduced motion.
 While a track is selected, scrolling down folds the player and navigation into
 one row, with an expand-navigation button and Search on either side. Scrolling
 up or pressing the expand button restores the tabs. The same player and playback

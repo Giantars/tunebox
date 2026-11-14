@@ -1465,7 +1465,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 17</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 18</p>
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Every song you play is kept on this phone, so the next play is instant and works without internet.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
     <div class="small">Connect the Google account where you uploaded your music. Your songs stay private in Drive.</div>
