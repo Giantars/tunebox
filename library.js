@@ -1,10 +1,16 @@
 'use strict';
 
+function isDownloadedTrack(track) { return !!track && track.source !== 'youtube' && S.cached.has(track.id); }
+function canBrowseTrack(track) { return !!track && (navigator.onLine || isDownloadedTrack(track)); }
+function visibleLibraryTracks() { return [...S.tracks.values()].filter(canBrowseTrack); }
+function visiblePlaylistTracks(playlist) { return playlist.ids.map(id => S.tracks.get(id)).filter(canBrowseTrack); }
+function visiblePlaylists() { return navigator.onLine ? S.playlists : S.playlists.filter(p => visiblePlaylistTracks(p).length); }
+
 function musicCollections() {
   const albums = new Map(), artists = new Map();
   const key = value => String(value || '').normalize('NFKC').trim().toLocaleLowerCase();
   for (const track of S.tracks.values()) {
-    if (!ownMusic(track)) continue;
+    if (!ownMusic(track) || !canBrowseTrack(track)) continue;
     const artist = String(track.artist || '').trim() || 'Unknown artist';
     const albumArtist = String(track.albumArtist || artist).trim() || artist;
     const album = String(track.album || '').trim();
@@ -47,14 +53,14 @@ function viewCollections() {
   if (sub.type === 'albums') {
     const albums = [...groups.albums.values()].sort((a, b) => a.title.localeCompare(b.title));
     return h + `<h1>Albums</h1><p class="library-summary">${albums.length} albums</p>`
-      + (albums.length ? `<div class="album-grid">${albums.map(albumCard).join('')}</div>` : '<div class="msg">Add music to see your albums here.</div>');
+      + (albums.length ? `<div class="album-grid">${albums.map(albumCard).join('')}</div>` : `<div class="msg">${navigator.onLine ? 'Add music to see your albums here.' : 'No downloaded albums yet.'}</div>`);
   }
   if (sub.type === 'artists') {
     const artists = [...groups.artists.values()].sort((a, b) => a.title.localeCompare(b.title));
     return h + `<h1>Artists</h1><p class="library-summary">${artists.length} artists</p>` + (artists.length ? `<div class="artist-grid">${artists.map(artist => `<button class="artist-card" data-act="open" data-type="artist" data-id="${esc(artist.id)}" data-reference="${esc(artist.cover.id)}">${art(artist.cover, 'artist-art')}<span class="t">${esc(artist.title)}</span><span class="a">${artist.tracks.length} songs</span></button>`).join('')}</div>` : '<div class="msg">Add music to see your artists here.</div>');
   }
   const artist = resolveMusicCollection(groups.artists, sub);
-  if (!artist) return h + '<h1>Artist</h1><div class="msg">This artist is no longer in your library.</div>';
+  if (!artist) return h + `<h1>Artist</h1><div class="msg">${navigator.onLine ? 'This artist is no longer in your library.' : 'No songs by this artist are downloaded yet.'}</div>`;
   const list = 'artist:' + sub.id;
   S.lists[list] = artist.tracks;
   return h + `<header class="collection-heading">${art(artist.cover, 'artist-art')}<div><h1>${esc(artist.title)}</h1><p class="small">${artist.albums.length} albums · ${artist.tracks.length} songs</p></div></header>`
@@ -63,20 +69,20 @@ function viewCollections() {
     + `<h2>Songs</h2>${rows(list, artist.tracks)}`;
 }
 function renderPersonalHome() {
-  const all = [...S.tracks.values()], mine = all.filter(ownMusic), groups = musicCollections();
-  const current = curTrack(), recent = all.filter(t => t.lastPlayed && t.id !== current?.id).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6);
+  const all = visibleLibraryTracks(), mine = all.filter(ownMusic), groups = musicCollections(), playlists = visiblePlaylists();
+  const current = canBrowseTrack(curTrack()) ? curTrack() : null, recent = all.filter(t => t.lastPlayed && t.id !== current?.id).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 6);
   const added = mine.slice().sort((a, b) => (b.added || 0) - (a.added || 0)).slice(0, 4);
   const favorites = [...groups.albums.values()].filter(a => a.liked).sort((a, b) => b.liked - a.liked || b.recent - a.recent).slice(0, 6);
-  const saved = all.filter(t => S.cached.has(t.id) && t.source !== 'local').length, liked = all.filter(t => t.liked).length;
+  const saved = all.filter(isDownloadedTrack).length, liked = all.filter(t => t.liked).length;
   document.body.classList.toggle('home-populated', !!(mine.length || current || S.playlists.length));
   S.lists.recentH = recent; S.lists.homeMusic = added;
   let h = `<div class="forest-scene" aria-hidden="true"><img src="assets/white-forest-photo.webp" alt="" decoding="async"></div><header class="home-heading"><div><div class="app-label">Tunebox</div><h1>Home<span class="offline-pill">Offline</span></h1></div><button class="profile-button" data-act="tab" data-tab="settings" aria-label="Open settings">${icon('settings')}</button></header>`;
   if (current) h += `<button class="continue-card" data-act="resume-current">${art(canon(current), 'art')}<span class="meta"><small>${engPlaying() ? 'Now playing' : 'Continue listening'}</small><span class="t">${esc(current.title)}</span><span class="a">${esc(current.artist)}${!engPlaying() && (engTime() || S.restorePos) > 0 ? ' · ' + fmt(engTime() || S.restorePos) : ''}</span></span><span class="continue-icon">${icon(engPlaying() ? 'queue' : 'play')}</span></button>`;
   h += `<div class="home-shortcuts"><button data-act="open" data-type="liked"><span class="shortcut-art favorite">${icon('heartOn')}</span><span>Favorites<small>${liked} songs</small></span></button><button data-act="open" data-type="offline"><span class="shortcut-art saved">${icon('download')}</span><span>Downloads<small>${saved} on this device</small></span></button></div>`;
-  if (!mine.length) h += `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>Add your songs from Google Drive or this device.</p><div class="setup-actions"><button class="btn primary" data-act="gd-sync">Connect & sync</button><button class="btn" data-act="import">Add files</button></div></section>`;
+  if (!mine.length) h += navigator.onLine ? `<section class="library-setup"><div class="setup-heading">${icon('cloud')}<h2>Your music library</h2></div><p>Add your songs from Google Drive or this device.</p><div class="setup-actions"><button class="btn primary" data-act="gd-sync">Connect & sync</button><button class="btn" data-act="import">Add files</button></div></section>` : `<section class="library-setup"><h2>No downloaded music yet</h2><p>Go online to download songs or playlists, or add files from this device.</p><button class="btn" data-act="import">Add files</button></section>`;
   if (recent.length) h += `<h2>Recently played<button class="section-link" data-act="open" data-type="recent">See all</button></h2><div class="recent-grid">${recent.map((t, i) => `<button class="recent-tile" data-act="play" data-list="recentH" data-i="${i}">${art(t, 'art')}<span class="t">${esc(t.title)}</span></button>`).join('')}</div>`;
   if (favorites.length) h += `<h2>Albums you love</h2><div class="cards">${favorites.map(albumCard).join('')}</div>`;
-  if (S.playlists.length) h += `<h2>Your playlists<button class="section-link" data-act="new-pl">New playlist</button></h2><div class="cards">${S.playlists.map(p => { const t = p.ids.map(id => S.tracks.get(id)).find(Boolean); return `<button class="card playlist-card" data-act="open" data-type="pl" data-id="${esc(p.id)}">${t ? art(t, 'card-art') : `<span class="card-art playlist-placeholder">${icon('list')}</span>`}<span class="t">${esc(p.name)}</span><span class="a">${p.ids.length} songs</span></button>`; }).join('')}</div>`;
+  if (playlists.length) h += `<h2>Your playlists<button class="section-link" data-act="new-pl">New playlist</button></h2><div class="cards">${playlists.map(p => { const tracks = visiblePlaylistTracks(p), t = tracks[0]; return `<button class="card playlist-card" data-act="open" data-type="pl" data-id="${esc(p.id)}">${t ? art(t, 'card-art') : `<span class="card-art playlist-placeholder">${icon('list')}</span>`}<span class="t">${esc(p.name)}</span><span class="a">${tracks.length} songs</span></button>`; }).join('')}</div>`;
   if (added.length) h += `<h2>Recently added<button class="section-link" data-act="tab" data-tab="library">See all</button></h2><div class="album-grid">${added.map((t, i) => `<button class="card" data-act="play" data-list="homeMusic" data-i="${i}">${art(t, 'card-art')}<span class="t">${esc(t.title)}</span><span class="a">${esc(t.artist)}</span></button>`).join('')}</div>`;
   if (isIOS() && !isStandalone() && !store.get('hideInstall', false)) h += `<div class="banner"><div>For full-screen listening, use Safari's Share menu and choose <b>Add to Home Screen</b>.</div><button class="icon" data-act="hide-install" aria-label="Dismiss">${icon('x')}</button></div>`;
   return h;

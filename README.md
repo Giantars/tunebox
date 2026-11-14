@@ -103,6 +103,15 @@ keyboard is open. It follows visual viewport changes, restores the dock when the
 keyboard is dismissed even if Search remains focused, and keeps desktop search
 navigation visible when no software keyboard appears.
 
+Version 27 filters offline music browsing to tracks whose audio is saved on this
+device, including imported local files. Home, Favorites, collections, playlists,
+Library counts, search and Up Next share the filter. YouTube search is disabled
+offline and Search uses saved music instead. Playlist download totals continue
+to include all requested files, so progress does not falsely show completion.
+Filtering never deletes library metadata or playlist membership; online music
+reappears on reconnection. Queue rows retain their original indices, and playlist
+removal resolves the original entry, so offline edits affect the intended song.
+
 ## Covers and song names
 
 Automatic catalog lookup resumes for existing Drive songs as well as new imports.

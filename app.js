@@ -602,7 +602,7 @@ function cleanLookupTitle(value) {
     .replace(/\s*[-|]\s*(?:official\s*)?(?:music\s*)?(?:video|audio|lyrics?)\s*$/i, '').trim();
 }
 function lookupStatusText() {
-  const tracks = [...S.tracks.values()].filter(ownMusic);
+  const tracks = visibleLibraryTracks().filter(ownMusic);
   if (!tracks.length) return 'Add songs to find their covers and names.';
   if (!settings.lookup) return 'Automatic cover lookup is off.';
   const covered = tracks.filter(hasCover).length;
@@ -988,6 +988,10 @@ let playToken = 0, curObjUrl = null, retries = 0;
 function playList(arr, i) {
   if (!arr || !arr.length) return;
   let q = arr.map(canon);
+  const selected = q[i];
+  if (!canBrowseTrack(selected)) { toast('This song is not downloaded for offline listening'); return; }
+  i = q.slice(0, i).filter(canBrowseTrack).length;
+  q = q.filter(canBrowseTrack);
   S.orig = null;
   if (S.shuffle) {
     const first = q[i];
@@ -1124,6 +1128,7 @@ function cycleRepeat() {
 // "Play next" songs line up in the order you add them (first added plays first).
 function playNext(t) {
   t = canon(t);
+  if (!canBrowseTrack(t)) { toast('This song is not downloaded for offline listening'); return; }
   if (!S.queue.length) return playList([t], 0);
   S.queue.splice(S.qi + 1 + S.pn, 0, t);
   S.pn++;
@@ -1134,6 +1139,7 @@ function playNext(t) {
 }
 function addToQueue(t) {
   t = canon(t);
+  if (!canBrowseTrack(t)) { toast('This song is not downloaded for offline listening'); return; }
   if (!S.queue.length) return playList([t], 0);
   S.queue.push(t);
   if (S.orig) S.orig.push(t);
@@ -1214,15 +1220,29 @@ function dur() {
   if (curIsYT()) { const d = yt && yt.getDuration ? yt.getDuration() : 0; return d > 0 ? d : (t && t.duration) || 0; }
   return isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (t && t.duration) || 0;
 }
+function refreshNetworkLibrary() {
+  const input = $('#q'), focused = input === document.activeElement;
+  const selection = focused ? [input.selectionStart, input.selectionEnd] : null;
+  const position = pageScroll.scrollTop, compact = document.body.classList.contains('dock-compact');
+  ++sTok; clearTimeout(sTimer); S.searching = false;
+  cancelQueueGesture();
+  if (!canBrowseTrack(curTrack()) && !engPlaying() && $('#np').classList.contains('open')) closeNP();
+  render();
+  if (S.tab === 'search') doSearch();
+  renderPlayer();
+  if (compact) setDockCompact(true, 'network');
+  scrollPageTo(0, position);
+  if (focused && $('#q')) { $('#q').focus({ preventScroll: true }); $('#q').setSelectionRange(...selection); }
+}
 window.addEventListener('online', () => {
   resumePlaylistDownloads();
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
   pumpLookup(); pumpArtworkSaves();
-  if (S.tab === 'home') render();
+  refreshNetworkLibrary();
 });
-window.addEventListener('offline', () => { document.body.classList.add('offline'); if (S.tab === 'home') render(); });
+window.addEventListener('offline', () => { document.body.classList.add('offline'); refreshNetworkLibrary(); });
 
 document.addEventListener('visibilitychange', () => {
   document.documentElement.classList.toggle('sky-paused', document.hidden);
@@ -1449,6 +1469,7 @@ function row(list, t, i, act = 'play') {
     <button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button></div>`;
 }
 function rows(list, arr, act) {
+  arr = arr.filter(canBrowseTrack);
   S.lists[list] = arr;
   return `<div class="list">${arr.map((t, i) => row(list, t, i, act)).join('')}</div>`;
 }
@@ -1457,28 +1478,30 @@ function isStandalone() { return navigator.standalone === true || matchMedia('(d
 
 function viewHome() { return renderPersonalHome(); }
 
+function searchSource() { return navigator.onLine ? S.source : 'mine'; }
 function viewSearch() {
   return `<h1>Search<span class="offline-pill">Offline</span></h1>
     <div class="seg">
-      <button data-act="src" data-src="youtube" class="${S.source === 'youtube' ? 'on' : ''}">YouTube</button>
-      <button data-act="src" data-src="mine" class="${S.source === 'mine' ? 'on' : ''}">Library</button>
+      <button data-act="src" data-src="youtube" ${navigator.onLine ? '' : 'disabled'} class="${searchSource() === 'youtube' ? 'on' : ''}">YouTube</button>
+      <button data-act="src" data-src="mine" class="${searchSource() === 'mine' ? 'on' : ''}">Library</button>
     </div>
-    <form id="searchForm" autocomplete="off"><input id="q" class="searchbox" type="search" enterkeyhint="search" placeholder="${S.source === 'mine' ? 'Search your saved songs' : 'Songs, artists'}" value="${esc(S.q)}"></form>
+    <form id="searchForm" autocomplete="off"><input id="q" class="searchbox" type="search" enterkeyhint="search" placeholder="${searchSource() === 'mine' ? 'Search your saved songs' : 'Songs, artists'}" value="${esc(S.q)}"></form>
     <div id="results"></div>`;
 }
 function renderResults() {
   const el = $('#results');
   if (!el) return;
+  const results = S.results.filter(canBrowseTrack);
   let h = '';
-  if (S.source === 'youtube' && !settings.ytKey) {
+  if (searchSource() === 'youtube' && !settings.ytKey) {
     h = `<div class="msg"><b>YouTube needs a free key</b><br><br>1. Open <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a><br>2. New project, then enable <b>YouTube Data API v3</b><br>3. Credentials, then <b>Create credentials</b>, then <b>API key</b><br>4. Paste it in Settings</div>`;
-  } else if (S.searching && !S.results.length) h = '<div class="msg">Searching…</div>';
+  } else if (S.searching && !results.length) h = '<div class="msg">Searching…</div>';
   else if (S.searchErr) h = `<div class="msg">${esc(S.searchErr)}</div>`;
-  else if (!S.results.length) h = `<div class="msg">${S.q ? 'No results' : S.source === 'mine' ? 'Songs you play, like or add show up here.' : ''}</div>`;
+  else if (!results.length) h = `<div class="msg">${S.q ? 'No results' : searchSource() === 'mine' ? 'Songs you play, like or add show up here.' : ''}</div>`;
   else {
-    const label = S.q ? '' : { youtube: '<h2>Top music videos</h2>' }[S.source] || '';
-    const note = S.source === 'youtube' ? '<div class="small" style="margin:4px 0 8px">YouTube songs play with the player open and the screen on. They are skipped when the phone is locked.</div>' : '';
-    h = label + note + rows('search', S.results.map(canon));
+    const label = S.q ? '' : { youtube: '<h2>Top music videos</h2>' }[searchSource()] || '';
+    const note = searchSource() === 'youtube' ? '<div class="small" style="margin:4px 0 8px">YouTube songs play with the player open and the screen on. They are skipped when the phone is locked.</div>' : '';
+    h = label + note + rows('search', results.map(canon));
   }
   el.innerHTML = h;
   observeVisibleCovers();
@@ -1487,10 +1510,10 @@ let sTok = 0, sTimer = null;
 async function doSearch() {
   const q = S.q.trim(), tok = ++sTok;
   S.searchErr = '';
-  if (S.source === 'mine') {
+  if (searchSource() === 'mine') {
     S.searching = false;
     const ql = q.toLowerCase();
-    S.results = [...S.tracks.values()]
+    S.results = visibleLibraryTracks()
       .filter(t => !ql || (t.title + ' ' + t.artist + ' ' + (t.album || '')).toLowerCase().includes(ql))
       .sort((a, b) => (b.lastPlayed || b.added || 0) - (a.lastPlayed || a.added || 0)).slice(0, 200);
     renderResults();
@@ -1515,14 +1538,14 @@ async function doSearch() {
 }
 
 function listFor(sub) {
-  const all = [...S.tracks.values()];
+  const all = visibleLibraryTracks();
   switch (sub.type) {
     case 'album': {
       const album = resolveMusicCollection(musicCollections().albums, sub);
-      return album ? { title: album.title, arr: album.tracks, subtitle: album.artist, cover: album.cover } : null;
+      return album ? { title: album.title, arr: album.tracks, subtitle: album.artist, cover: album.cover } : navigator.onLine ? null : { title: 'Album', arr: [], empty: 'No songs in this album are downloaded yet.' };
     }
     case 'liked': return { title: 'Liked songs', arr: all.filter(t => t.liked).sort((a, b) => b.liked - a.liked), empty: 'Tap the heart on any song to add it here.' };
-    case 'offline': return { title: 'Downloaded', arr: all.filter(t => S.cached.has(t.id) && t.source !== 'local').sort((a, b) => (b.saved || 0) - (a.saved || 0)), empty: 'Songs save here automatically after you play them.' };
+    case 'offline': return { title: 'Downloaded', arr: all.filter(isDownloadedTrack).sort((a, b) => (b.saved || 0) - (a.saved || 0)), empty: 'Songs save here automatically after you play them.' };
     case 'recent': return { title: 'Recently played', arr: all.filter(t => t.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed).slice(0, 150), empty: 'Nothing played yet.' };
     case 'drive': return {
       title: 'Google Drive',
@@ -1533,31 +1556,31 @@ function listFor(sub) {
     case 'pl': {
       const p = S.playlists.find(x => x.id === sub.id);
       if (!p) return null;
-      return { title: p.name, arr: p.ids.map(id => S.tracks.get(id)).filter(Boolean), pl: p, empty: 'Add songs with the ••• button on any song.' };
+      return { title: p.name, arr: visiblePlaylistTracks(p), pl: p, empty: 'Add songs with the ••• button on any song.' };
     }
   }
   return null;
 }
 function viewLibrary() {
-  const all = [...S.tracks.values()];
+  const all = visibleLibraryTracks(), playlists = visiblePlaylists();
   const groups = musicCollections();
   const c = {
     albums: groups.albums.size, artists: groups.artists.size,
     liked: all.filter(t => t.liked).length,
-    offline: all.filter(t => S.cached.has(t.id) && t.source !== 'local').length,
+    offline: all.filter(isDownloadedTrack).length,
     recent: all.filter(t => t.lastPlayed).length,
     local: all.filter(t => t.source === 'local').length,
     drive: all.filter(t => t.source === 'drive').length,
   };
   const item = (type, ic, label) => `<button class="lib-item" data-act="open" data-type="${type}">${icon(ic)}${label}<span class="n">${c[type]}</span></button>`;
-  let h = `<h1>Library<span class="offline-pill">Offline</span></h1><p class="library-summary">${all.length} songs &middot; ${S.playlists.length} playlists</p>`
+  let h = `<h1>Library<span class="offline-pill">Offline</span></h1><p class="library-summary">${all.length} songs &middot; ${playlists.length} playlists</p>`
     + (settings.gClientId || c.drive ? item('drive', 'cloud', 'Google Drive') : '')
     + item('albums', 'album', 'Albums') + item('artists', 'artist', 'Artists')
     + item('liked', 'heartOn', 'Favorites') + item('offline', 'download', 'Downloads')
     + item('recent', 'clock', 'Recently played') + item('local', 'folder', 'My files');
   h += `<h2>Playlists <button class="addpl" data-act="new-pl">+ New</button></h2>`;
-  if (!S.playlists.length) h += '<div class="small">No playlists yet.</div>';
-  for (const p of S.playlists) h += `<button class="lib-item" data-act="open" data-type="pl" data-id="${esc(p.id)}">${icon('list')}${esc(p.name)}<span class="n">${p.ids.length}</span></button>`;
+  if (!playlists.length) h += '<div class="small">No playlists yet.</div>';
+  for (const p of playlists) h += `<button class="lib-item" data-act="open" data-type="pl" data-id="${esc(p.id)}">${icon('list')}${esc(p.name)}<span class="n">${visiblePlaylistTracks(p).length}</span></button>`;
   return h;
 }
 function viewList() {
@@ -1580,11 +1603,11 @@ function viewList() {
   if (L.arr.length) {
     h += `<div class="list-head"><button class="btn" data-act="play-all" data-list="${esc(key)}">${icon('play')}Play</button><button class="btn" data-act="shuffle-all" data-list="${esc(key)}">${icon('shuffle')}Shuffle</button></div>`;
     h += rows(key, L.arr);
-  } else h += `<div class="msg">${esc(L.empty)}</div>`;
+  } else h += `<div class="msg">${esc(navigator.onLine ? L.empty : 'No downloaded songs in this list. Go online to download music for offline listening.')}</div>`;
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 26</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 27</p>
   ${appearanceSettingsHTML()}
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Drive songs you play are kept on this phone. YouTube videos stay online.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
@@ -1721,8 +1744,9 @@ function updatePlayerBackdrop(track, source) {
 let lastArtId = null;
 function renderPlayer() {
   const t = curTrack();
-  document.body.classList.toggle('has-player', !!t);
-  $('#mini').classList.toggle('hidden', !t);
+  const showPlayer = !!t && (canBrowseTrack(t) || engPlaying());
+  document.body.classList.toggle('has-player', showPlayer);
+  $('#mini').classList.toggle('hidden', !showPlayer);
   if (!t) { setDockCompact(false, 'player'); updatePlayerBackdrop(null, ''); return; }
   updatePlayerBackdrop(t, artSrc(t));
   if (lastArtId !== t.id || !$('#npArt img, #npArt .ph')) {
@@ -1887,7 +1911,12 @@ function trackMenu(t, ctx = {}) {
   }
   if (ctx.list && ctx.list.startsWith('pl:')) {
     const p = S.playlists.find(x => 'pl:' + x.id === ctx.list);
-    if (p) items.push({ label: 'Remove from this playlist', danger: true, fn: async () => { p.ids.splice(ctx.i, 1); await DB.put('playlists', p); render(); } });
+    if (p) {
+      const occurrence = (S.lists[ctx.list] || []).slice(0, ctx.i).filter(x => x.id === t.id).length;
+      let seen = 0;
+      const index = p.ids.findIndex(id => id === t.id && seen++ === occurrence);
+      items.push({ label: 'Remove from this playlist', danger: true, fn: async () => { if (index >= 0) p.ids.splice(index, 1); await DB.put('playlists', p); render(); } });
+    }
   }
   if (ctx.list === 'queue' && ctx.i !== S.qi) {
     items.push({ label: 'Remove from queue', danger: true, fn: () => removeQueuedTrack(ctx.i) });
@@ -2022,7 +2051,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'q') {
     S.q = e.target.value;
     clearTimeout(sTimer);
-    sTimer = setTimeout(doSearch, S.source === 'mine' ? 120 : 450);
+    sTimer = setTimeout(doSearch, searchSource() === 'mine' ? 120 : 450);
   }
 });
 document.addEventListener('submit', e => {

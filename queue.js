@@ -1,6 +1,8 @@
 'use strict';
 let queueGesture = null, queueDragFrame = 0, queueClickBlock = null;
 function queueGestureActive() { return !!queueGesture && sameQueue(queueGesture); }
+function queueFutureIndices() { return S.queue.map((t, i) => i > S.qi && canBrowseTrack(t) ? i : -1).filter(i => i >= 0); }
+function queueNeighbor(index, direction) { const indices = queueFutureIndices(); return indices[indices.indexOf(index) + direction]; }
 function moveQueuedTrack(from, to) {
   from = Number(from); to = Number(to);
   if (!Number.isInteger(from) || !Number.isInteger(to) || from <= S.qi || to <= S.qi || from >= S.queue.length || to >= S.queue.length || from === to) return false;
@@ -9,7 +11,7 @@ function moveQueuedTrack(from, to) {
   else if (from > boundary && to <= boundary) S.pn++;
   const [track] = S.queue.splice(from, 1); S.queue.splice(to, 0, track);
   if (S.orig) S.orig = S.queue.slice();
-  saveQueue(); renderQueue(); announceQueue(`Moved ${track.title} to position ${to - S.qi}`);
+  saveQueue(); renderQueue(); announceQueue(`Moved ${track.title} to position ${queueFutureIndices().indexOf(to) + 1}`);
   return true;
 }
 function removeQueuedTrack(index) {
@@ -28,18 +30,20 @@ function queueMoveMenu(index) {
   index = Number(index); const track = S.queue[index];
   if (!track || index <= S.qi) return;
   const items = [];
-  if (index > S.qi + 1) items.push({ label: 'Move up', fn: () => moveQueuedTrack(index, index - 1) });
-  if (index < S.queue.length - 1) items.push({ label: 'Move down', fn: () => moveQueuedTrack(index, index + 1) });
+  const previous = queueNeighbor(index, -1), next = queueNeighbor(index, 1);
+  if (previous !== undefined) items.push({ label: 'Move up', fn: () => moveQueuedTrack(index, previous) });
+  if (next !== undefined) items.push({ label: 'Move down', fn: () => moveQueuedTrack(index, next) });
   items.push({ label: 'Remove from queue', danger: true, fn: () => removeQueuedTrack(index) });
   sheet(trackTitleHtml(track), items);
 }
 function renderQueueContent() {
-  const current = curTrack(), count = Math.max(0, S.queue.length - S.qi - 1);
-  const upcoming = S.queue.slice(S.qi + 1).map((t, offset) => {
-    const i = S.qi + 1 + offset;
+  const current = curTrack(), indices = queueFutureIndices(), count = indices.length;
+  const upcoming = indices.map((i, offset) => {
+    const t = S.queue[i];
     return `<div class="queue-entry" data-queue-index="${i}"><button class="queue-remove" data-act="queue-remove" data-i="${i}" aria-label="Remove ${esc(t.title)} from queue">Remove</button><div class="queue-row">${row('queue', t, i, 'q-play')}<button class="queue-grip icon" data-act="queue-move" data-i="${i}" aria-label="Reorder ${esc(t.title)}. Drag, or use arrow keys.">${icon('grip')}</button></div>${offset === 0 ? '<span class="queue-next">Next</span>' : ''}</div>`;
   }).join('');
-  return `<div class="queue-heading"><h2>Playing now</h2><span class="small">${S.shuffle ? 'Shuffle on' : ''}</span></div>${current ? row('queue', current, S.qi, 'q-play') : ''}<div class="queue-heading"><h2>Up next</h2><span class="small">${count} songs</span></div>${count ? `<p class="queue-help small">Drag the handle to reorder. Swipe left to remove.</p><div class="queue-future">${upcoming}</div>` : '<div class="msg">Choose a song’s menu and tap Play next to add it here.</div>'}`;
+  const showCurrent = current && (canBrowseTrack(current) || engPlaying());
+  return `${showCurrent ? `<div class="queue-heading"><h2>Playing now</h2><span class="small">${S.shuffle ? 'Shuffle on' : ''}</span></div>${row('queue', current, S.qi, 'q-play')}` : ''}<div class="queue-heading"><h2>Up next</h2><span class="small">${count} songs</span></div>${count ? `<p class="queue-help small">Drag the handle to reorder. Swipe left to remove.</p><div class="queue-future">${upcoming}</div>` : '<div class="msg">Choose a song’s menu and tap Play next to add it here.</div>'}`;
 }
 function cancelQueueGesture() {
   if (queueDragFrame) cancelAnimationFrame(queueDragFrame);
@@ -56,7 +60,8 @@ function updateQueueDrag() {
   const g = queueGesture;
   if (!g || g.kind !== 'drag') return;
   const delta = $('#npQueue').scrollTop - g.scroll;
-  g.to = Math.max(S.qi + 1, Math.min(S.queue.length - 1, S.qi + 1 + Math.floor((g.y - g.listTop + delta) / g.height)));
+  const position = Math.max(0, Math.min(g.indices.length - 1, Math.floor((g.y - g.listTop + delta) / g.height)));
+  g.to = g.indices[position];
   g.entry.style.transform = `translateY(${g.y - g.startY + delta}px)`;
   $$('.queue-drop-target').forEach(el => el.classList.remove('queue-drop-target'));
   $(`[data-queue-index="${g.to}"]`)?.classList.add('queue-drop-target');
@@ -79,7 +84,7 @@ document.addEventListener('pointerdown', event => {
   $$('.queue-entry.revealed').forEach(el => { if (el !== entry) el.classList.remove('revealed'); });
   const bounds = entry.getBoundingClientRect(), panel = $('#npQueue').getBoundingClientRect();
   queueGesture = { kind: grip ? 'drag' : 'swipe', pointer: event.pointerId, entry, row: entry.querySelector('.queue-row'),
-    index: Number(entry.dataset.queueIndex), to: Number(entry.dataset.queueIndex), qi: S.qi, snapshot: S.queue.slice(),
+    index: Number(entry.dataset.queueIndex), to: Number(entry.dataset.queueIndex), indices: queueFutureIndices(), qi: S.qi, snapshot: S.queue.slice(),
     x: event.clientX, y: event.clientY, startY: event.clientY, scroll: $('#npQueue').scrollTop,
     listTop: $('.queue-future').getBoundingClientRect().top, height: bounds.height,
     panelTop: panel.top, panelBottom: panel.bottom, moved: false, dx: 0 };
@@ -124,7 +129,7 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
   const grip = event.target.closest?.('.queue-grip');
   if (!grip || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
-  event.preventDefault(); const from = Number(grip.dataset.i), to = from + (event.key === 'ArrowUp' ? -1 : 1);
+  event.preventDefault(); const from = Number(grip.dataset.i), to = queueNeighbor(from, event.key === 'ArrowUp' ? -1 : 1);
   if (moveQueuedTrack(from, to)) $(`.queue-grip[data-i="${to}"]`)?.focus({ preventScroll: true });
 });
 window.addEventListener('blur', cancelQueueGesture);
