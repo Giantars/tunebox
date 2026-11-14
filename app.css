@@ -262,3 +262,26 @@ button:focus-visible,a:focus-visible{outline:2px solid var(--ac);outline-offset:
 /* Fade text before it reaches navigation; no second blurred surface. */
 .dock-shade{position:fixed;left:0;right:0;bottom:0;height:calc(var(--safe-b) + 105px);background:linear-gradient(transparent,#10101275 45%,#101012b8);pointer-events:none;z-index:18}
 body.has-player .dock-shade{height:calc(var(--safe-b) + 173px)}
+
+/* Proportions and direct-manipulation behavior from the supplied iPhone recording. */
+:root{--minih:48px}
+.tabs{height:64px;border-radius:32px;background:rgba(37,37,40,.47);border-color:#ffffff21;backdrop-filter:blur(3px) saturate(1.12);-webkit-backdrop-filter:blur(3px) saturate(1.12);touch-action:pan-y}
+.tabs button{height:54px;gap:3px;font-size:10px;transition:color .16s}
+.tabs button.on{color:var(--ac)}
+.tab-lens{height:54px;border-radius:28px;background:#ffffff09;transition:transform .32s cubic-bezier(.22,.8,.25,1.08),background .18s;transform-origin:center}
+.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px)) scale(1.08);background:linear-gradient(155deg,#ffffff20,#ffffff05);box-shadow:inset 0 .5px 0 #ffffff38,0 2px 6px #0002}
+.tabs.is-scrubbing .tab-lens{transition:background .16s,box-shadow .16s}
+.tabs.is-scrubbing button{transition:none}
+.tabs.is-touched button.on{color:#d0d0d8}
+.tabs.is-touched button.scrub-target{color:var(--ac)}
+.tabs button:focus-visible{outline-offset:-4px}
+.mini{left:22px;right:22px;bottom:calc(var(--safe-b) + 80px);height:48px;gap:8px;border-radius:24px;padding:0 4px 0 8px;background:rgba(38,38,41,.59);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);border-color:#ffffff1b}
+.mini .art{width:32px;height:32px;border-radius:6px;font-size:15px}
+.mini .t{font-size:12px;font-weight:550}.mini .a{display:none}
+.mini .icon{width:38px;height:44px}.mini .icon .ic{width:21px;height:21px}
+.mini .bar{opacity:.28}
+.dock-shade{background:linear-gradient(transparent,#10101228 45%,#10101270)}
+body.has-player .dock-shade{height:calc(var(--safe-b) + 145px)}
+@supports not (backdrop-filter:blur(1px)){.tabs,.mini{background:#29292d}}
+@media(prefers-reduced-transparency:reduce){.tabs,.mini{background:#29292d;backdrop-filter:none;-webkit-backdrop-filter:none}.tabs.is-touched .tab-lens{background:#45454b;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.tab-lens,.tabs button{transition:none}.tabs.is-touched .tab-lens{transform:translateX(var(--lens-x,0px))}}

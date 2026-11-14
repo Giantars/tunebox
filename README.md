@@ -20,7 +20,9 @@ After changing files, bump `VERSION` in `sw.js` so phones pick up the new versio
 ## Glass navigation
 
 The bottom dock uses one live CSS backdrop with a light blur. `glass.js` adds a
-small touch highlight. There is no canvas snapshot, texture upload, or JavaScript
+touch highlight and direct horizontal tab scrubbing. A normal tap or keyboard
+activation uses the standard button; dragging previews tabs and selects on release.
+There is no canvas snapshot, texture upload, or JavaScript
 scroll handler: content stays in the browser's compositor during scrolling.
 This approximates a glass finish; it does not implement Apple's native Liquid
 Glass refraction. Reduced transparency uses an opaque dock; reduced motion
