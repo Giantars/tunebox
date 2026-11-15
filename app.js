@@ -444,17 +444,17 @@ async function applyTags(c, blob) {
   if (tags.artist && !exactCatalog) { c.artist = tags.artist; c.artistCredits = tags.artistCredits || null; }
   if (tags.album && !exactCatalog) c.album = tags.album;
   for (const key of ['albumArtist', 'trackNumber', 'discNumber']) if (tags[key] && (!exactCatalog || !c[key])) c[key] = tags[key];
-  if (tags.pic) {
+  if (tags.pic && (!c.hasArt || !tags.coverKey || c.coverKey !== tags.coverKey)) {
     try {
       const d = tags.pic.data;
       await DB.put('blobs', { buf: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength), type: tags.pic.mime }, c.id + '#art');
       c.hasArt = true;
       c.coverKey = tags.coverKey || '';
-      c.art = '';
-      if (artUrls.has(c.id)) { URL.revokeObjectURL(artUrls.get(c.id)); artUrls.delete(c.id); }
+      // Keep an existing online cover as a fallback while the embedded one decodes.
+      loadArt(c.id, true);
     } catch { /* ignore */ }
   }
-  if (tags.title || tags.pic) { lastArtId = null; setTimeout(() => { softRender(); renderPlayer(); }, 0); }
+  if (tags.title || tags.pic) { refreshLookupTrack(c); refreshRows(); }
   if (!c.hasArt && !c.art) enqueueLookup(c, true);
 }
 async function getBlob(id) {
@@ -595,7 +595,7 @@ async function driveSync() {
     store.set('gdLastSync', Date.now());
     resumeLibraryDownload();
     toast(`Google Drive: ${found.length} songs${fresh.length ? ` (${fresh.length} new)` : ''}${removed ? `, ${removed} removed` : ''}`);
-    render();
+    render({ background: true });
   } catch (e) {
     if (e.message === 'DRIVE_AUTH') gdConnect();
     else toast('Drive sync failed: ' + e.message);
@@ -698,7 +698,7 @@ async function pumpLookup() {
 }
 function refreshLookupTrack(c) {
   $$(`[data-tid="${CSS.escape(c.id)}"]`).forEach(el => {
-    const item = el.closest('.row, .card, .recent-tile');
+    const item = el.closest('.row, .card[data-act="play"], .recent-tile');
     const src = artSrc(c);
     if (src) swapArt(el, src);
     if (!item) return;
@@ -707,7 +707,7 @@ function refreshLookupTrack(c) {
     if (artist) artist.textContent = c.artist + (item.classList.contains('row') && c.duration ? ' \u00b7 ' + fmt(c.duration) : '');
   });
   const cur = curTrack();
-  if (cur && cur.id === c.id) { lastArtId = null; renderPlayer(); updateMediaSession(c); }
+  if (cur && cur.id === c.id) { renderPlayer(); updateMediaSession(c); }
 }
 function artistParts(value) {
   return String(value || '').split(/\s*(?:,|&|\bfeaturing\b|\bfeat\.?\s|\bft\.?\s|\s+x\s+)\s*/i).map(norm).filter(Boolean);
@@ -915,29 +915,44 @@ function artSrc(t) {
   if (t.hasArt) loadArt(t.id);
   return navigator.onLine ? t.art || '' : '';
 }
-const artLoading = new Set();
-async function loadArt(id) {
-  if (artLoading.has(id) || artUrls.has(id)) return;
-  artLoading.add(id);
-  try {
-    const b = await getBlob(id + '#art');
-    if (b) {
-      const u = URL.createObjectURL(b);
-      artUrls.set(id, u);
-      $$(`[data-tid="${CSS.escape(id)}"]`).forEach(el => swapArt(el, u));
-      const c = curTrack();
-      if (c && c.id === id) { updatePlayerBackdrop(c, u); updateMediaSession(c); }
-    }
-  } catch { /* ignore */ }
-  artLoading.delete(id);
+const artLoading = new Map(), artVersions = new Map();
+function loadArt(id, force = false) {
+  if (!force && artLoading.has(id)) return artLoading.get(id);
+  if (!force && artUrls.has(id)) return Promise.resolve(artUrls.get(id));
+  const version = (artVersions.get(id) || 0) + 1;
+  artVersions.set(id, version);
+  const task = (async () => {
+    let url = '';
+    try {
+      const blob = await getBlob(id + '#art');
+      if (!blob) return null;
+      url = URL.createObjectURL(blob);
+      const image = new Image(); image.src = url;
+      await image.decode(); // Keep the current cover visible until its replacement is ready.
+      if (artVersions.get(id) !== version || !S.tracks.get(id)?.hasArt) { URL.revokeObjectURL(url); return null; }
+      const previous = artUrls.get(id);
+      artUrls.set(id, url);
+      $$(`[data-tid="${CSS.escape(id)}"]`).forEach(el => swapArt(el, url));
+      const current = curTrack();
+      if (current?.id === id) { updatePlayerBackdrop(current, url); updateMediaSession(current); }
+      if (previous && previous !== url) URL.revokeObjectURL(previous);
+      return url;
+    } catch { if (url) URL.revokeObjectURL(url); return null; }
+  })();
+  artLoading.set(id, task);
+  task.finally(() => { if (artLoading.get(id) === task) artLoading.delete(id); });
+  return task;
 }
 function swapArt(el, url) {
-  if (el.tagName === 'IMG') { el.src = url; return; }
+  if (el.tagName === 'IMG') {
+    if (el.getAttribute('src') === url) return;
+    delete el.dataset.fb; el.src = url; return;
+  }
   const img = document.createElement('img');
   img.className = el.className.replace(/\bph\b/, '').trim();
   img.dataset.tid = el.dataset.tid;
   img.alt = '';
-  img.loading = el.closest('#view') ? 'lazy' : 'eager';
+  img.loading = 'eager';
   img.decoding = 'async';
   img.src = url;
   el.replaceWith(img);
@@ -960,10 +975,12 @@ document.addEventListener('error', e => {
     updateLookupStatus();
   }
   if (t && t.hasArt) {
-    getBlob(id + '#art').then(b => {
-      if (b) { const u = URL.createObjectURL(b); artUrls.set(id, u); img.src = u; }
+    const failed = img.getAttribute('src');
+    loadArt(id, artUrls.get(id) === img.src).then(url => {
+      if (!img.isConnected || img.getAttribute('src') !== failed) return;
+      if (url && url !== failed) swapArt(img, url);
       else img.replaceWith(phEl(img, t));
-    }).catch(() => img.replaceWith(phEl(img, t)));
+    });
   } else img.replaceWith(phEl(img, t || { id, title: '?' }));
 }, true);
 document.addEventListener('load', e => {
@@ -1500,7 +1517,7 @@ function fillIcons(root) { $$('[data-icon]', root).forEach(el => { el.innerHTML 
 function row(list, t, i, act = 'play') {
   const c = curTrack();
   const st = S.cached.has(t.id) ? '<span class="dot saved"></span>' : S.downloading.has(t.id) ? '<span class="dot dl"></span>' : '';
-  return `<div class="row${c && c.id === t.id ? ' cur' : ''}" data-list="${esc(list)}" data-i="${i}">
+  return `<div class="row${c && c.id === t.id ? ' cur' : ''}" data-track-id="${esc(t.id)}" data-list="${esc(list)}" data-i="${i}">
     ${art(t, 'art')}
     <div class="meta"><div class="t">${esc(t.title)}</div><div class="a">${st}<span class="x">${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</span></div></div>
     <button class="icon song-play" data-act="${act}" data-list="${esc(list)}" data-i="${i}" aria-label="Play ${esc(t.title)}">${icon('play')}</button><button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button></div>`;
@@ -1542,7 +1559,7 @@ function renderResults() {
     const note = searchSource() === 'youtube' ? '<div class="small" style="margin:4px 0 8px">YouTube songs play with the player open and the screen on. They are skipped when the phone is locked.</div>' : '';
     h = label + note + rows('search', results.map(canon));
   }
-  el.innerHTML = h;
+  patchContent(el, h);
   observeVisibleCovers();
 }
 let sTok = 0, sTimer = null;
@@ -1646,7 +1663,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 31</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 32</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${appearanceSettingsHTML()}
@@ -1689,9 +1706,9 @@ async function updateStorageInfo() {
   el.innerHTML = h;
 }
 
-function render() {
+function render({ background = false } = {}) {
   document.body.dataset.view = S.tab;
-  setDockCompact(false, 'view');
+  if (!background) setDockCompact(false, 'view');
   $('#compactTabIcon').innerHTML = icon(S.tab === 'library' ? 'library' : S.tab);
   $$('.tabs button').forEach((b, i) => {
     const selected = b.dataset.tab === S.tab;
@@ -1706,12 +1723,11 @@ function render() {
   else if (S.tab === 'search') h = viewSearch();
   else if (S.tab === 'library') h = S.sub ? viewList() : viewLibrary();
   else h = viewSettings();
-  v.innerHTML = h;
+  if (background) patchContent(v, h); else v.innerHTML = h;
   if (S.tab === 'search') renderResults();
   if (S.tab === 'settings') updateStorageInfo();
   observeVisibleCovers();
 }
-function softRender() { if (S.tab === 'search') renderResults(); else render(); }
 let rrTimer = null;
 function refreshRows() {
   clearTimeout(rrTimer);
@@ -1742,6 +1758,18 @@ function renderPlayState() {
   $('#npPlay').setAttribute('aria-label', playing ? 'Pause' : 'Play');
   $('#np').classList.toggle('paused', !playing);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  syncHomeContinue();
+}
+function syncHomeContinue() {
+  const card = $('#view .continue-card'), track = curTrack();
+  if (!card || !track || S.tab !== 'home') return;
+  const image = $('[data-tid]', card);
+  if (image && image.dataset.tid !== track.id) image.outerHTML = art(track, 'art');
+  $('.meta .t', card).textContent = track.title;
+  $('.meta .a', card).textContent = track.artist;
+  $('.meta small', card).textContent = engPlaying() ? 'Now playing' : 'Continue listening';
+  const kind = engPlaying() ? 'queue' : 'play', indicator = $('.continue-icon', card);
+  if (indicator.dataset.icon !== kind) { indicator.dataset.icon = kind; indicator.innerHTML = icon(kind); }
 }
 function setDockCompact(compact, source = 'manual') {
   const next = !!compact && !!curTrack();
@@ -1842,7 +1870,7 @@ function renderQueue() {
   q.classList.toggle('hidden', !S.showQueue);
   if (!S.showQueue) return;
   S.lists.queue = S.queue;
-  q.innerHTML = renderQueueContent();
+  patchContent(q, renderQueueContent());
   q.scrollTop = position;
 }
 let overlayScroll = null, playerReturnFocus = null, sheetReturnFocus = null;

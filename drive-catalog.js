@@ -63,9 +63,8 @@ async function refreshDriveCatalog(ids = null, force = false) {
       lastDriveCatalogCheck = Date.now();
       if (count) {
         const top = pageScroll.scrollTop, compact = document.body.classList.contains('dock-compact');
-        if (!document.body.classList.contains('overlay-open')) {
-          render(); scrollPageTo(0, top); if (compact) setDockCompact(true, 'covers');
-          if (S.tab === 'search') doSearch();
+        if (S.tab === 'library' && !document.body.classList.contains('overlay-open')) {
+          render({ background: true }); scrollPageTo(0, top); if (compact) setDockCompact(true, 'covers');
         }
         renderPlayer(); updateLookupStatus();
       }

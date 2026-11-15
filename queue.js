@@ -38,9 +38,11 @@ function queueMoveMenu(index) {
 }
 function renderQueueContent() {
   const current = curTrack(), indices = queueFutureIndices(), count = indices.length;
+  const occurrences = new Map();
   const upcoming = indices.map((i, offset) => {
     const t = S.queue[i];
-    return `<div class="queue-entry" data-queue-index="${i}"><button class="queue-remove" data-act="queue-remove" data-i="${i}" aria-label="Remove ${esc(t.title)} from queue">Remove</button><div class="queue-row">${row('queue', t, i, 'q-play')}<button class="queue-grip icon" data-act="queue-move" data-i="${i}" aria-label="Reorder ${esc(t.title)}. Drag, or use arrow keys.">${icon('grip')}</button></div>${offset === 0 ? '<span class="queue-next">Next</span>' : ''}</div>`;
+    const occurrence = occurrences.get(t.id) || 0; occurrences.set(t.id, occurrence + 1);
+    return `<div class="queue-entry" data-queue-key="${esc(t.id)}:${occurrence}" data-queue-index="${i}"><button class="queue-remove" data-act="queue-remove" data-i="${i}" aria-label="Remove ${esc(t.title)} from queue">Remove</button><div class="queue-row">${row('queue', t, i, 'q-play')}<button class="queue-grip icon" data-act="queue-move" data-i="${i}" aria-label="Reorder ${esc(t.title)}. Drag, or use arrow keys.">${icon('grip')}</button></div>${offset === 0 ? '<span class="queue-next">Next</span>' : ''}</div>`;
   }).join('');
   const showCurrent = current && (canBrowseTrack(current) || engPlaying());
   return `${showCurrent ? `<div class="queue-heading"><h2>Playing now</h2><span class="small">${S.shuffle ? 'Shuffle on' : ''}</span></div>${row('queue', current, S.qi, 'q-play')}` : ''}<div class="queue-heading"><h2>Up next</h2><span class="small">${count} songs${settings.autoplay && current?.source !== 'youtube' ? ' ? Autoplay on' : ''}</span></div>${count ? `<p class="queue-help small">Tap play to listen. Drag to reorder; swipe to remove.</p><div class="queue-future">${upcoming}</div>` : '<div class="msg">Choose a song’s menu and tap Play next to add it here.</div>'}`;
