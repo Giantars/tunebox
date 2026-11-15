@@ -440,7 +440,7 @@ async function applyTags(c, blob) {
   c.tagged = 1;
   const tags = await readTags(blob);
   if (tags.title) { c.title = tags.title; c.named = 'tags'; }
-  if (tags.artist) c.artist = tags.artist;
+  if (tags.artist) { c.artist = tags.artist; c.artistCredits = tags.artistCredits || null; }
   if (tags.album) c.album = tags.album;
   for (const key of ['albumArtist', 'trackNumber', 'discNumber']) if (tags[key]) c[key] = tags[key];
   if (tags.pic) {
@@ -448,6 +448,7 @@ async function applyTags(c, blob) {
       const d = tags.pic.data;
       await DB.put('blobs', { buf: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength), type: tags.pic.mime }, c.id + '#art');
       c.hasArt = true;
+      c.coverKey = tags.coverKey || '';
       c.art = '';
       if (artUrls.has(c.id)) { URL.revokeObjectURL(artUrls.get(c.id)); artUrls.delete(c.id); }
     } catch { /* ignore */ }
@@ -767,6 +768,7 @@ async function lookupMusicBrainz(title, artist, featured) {
   }
   return {
     trackName: recording.title,
+    artistCredits: (recording['artist-credit'] || []).map(a => ({ name: a.artist?.name || a.name, id: a.artist?.id })).filter(a => a.name),
     artistName: (recording['artist-credit'] || []).map(a => a.name || a.artist?.name).filter(Boolean).join(' & '),
     collectionName: album, trackTimeMillis: recording.length || 0, artworkUrl500: cover,
     catalogSource: 'musicbrainz', sourceUrl: `https://musicbrainz.org/recording/${recording.id}`,
@@ -884,10 +886,11 @@ async function lookupOne(c) {
       c.art = artwork.replace(/\/\d+x\d+bb\./, '/600x600bb.');
       c.artFailed = false;
     }
-    if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; c.named = 'catalog'; }
+    if (c.named !== 'tags') { c.title = best.trackName; c.artist = best.artistName; c.artistCredits = best.artistCredits || null; c.named = 'catalog'; }
     c.metadataSource = best.catalogSource || 'itunes';
     c.metadataUrl = best.sourceUrl || best.trackViewUrl || '';
     if ((!c.album || c.named !== 'tags') && best.collectionName) c.album = best.collectionName.replace(/\s+-\s+(Single|EP)$/i, '');
+    if (best.collectionId && collectionKey(c.album) === collectionKey((best.collectionName || '').replace(/\s+-\s+(Single|EP)$/i, ''))) c.catalogAlbumId = 'itunes:' + best.collectionId;
     for (const key of ['trackNumber', 'discNumber']) if (!c[key] && best[key]) c[key] = best[key];
     if (!c.albumArtist && best.collectionArtistName) c.albumArtist = best.collectionArtistName;
     if (!c.duration && best.trackTimeMillis) c.duration = best.trackTimeMillis / 1000;
@@ -1310,9 +1313,9 @@ audio.addEventListener('playing', setupMediaActions);
 /* ---------------- Local files ---------------- */
 function syncsafe(b, o) { return ((b[o] & 0x7f) << 21) | ((b[o + 1] & 0x7f) << 14) | ((b[o + 2] & 0x7f) << 7) | (b[o + 3] & 0x7f); }
 function be32(b, o) { return ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0; }
-function decodeText(enc, data) {
+function decodeText(enc, data, separator = '') {
   const lbl = ['iso-8859-1', 'utf-16', 'utf-16be', 'utf-8'][enc] || 'utf-8';
-  try { return new TextDecoder(lbl).decode(data).replace(/\0/g, '').trim(); } catch { return ''; }
+  try { return new TextDecoder(lbl).decode(data).replace(/\0+/g, separator).trim(); } catch { return ''; }
 }
 function findTerm(b, start, enc) {
   if (enc === 1 || enc === 2) { for (let i = start; i + 1 < b.length; i += 2) if (b[i] === 0 && b[i + 1] === 0) return [i, i + 2]; }
@@ -1348,11 +1351,17 @@ async function readTags(file) {
       const fs = v22 ? (b[p + 3] << 16) | (b[p + 4] << 8) | b[p + 5] : ver === 4 ? syncsafe(b, p + 4) : be32(b, p + 4);
       if (fs <= 0 || p + hl + fs > b.length) break;
       const data = b.subarray(p + hl, p + hl + fs);
-      if (map[id]) out[map[id]] = decodeText(data[0], data.subarray(1));
+      if (map[id]) {
+        const artistFrame = map[id] === 'artist';
+        const text = decodeText(data[0], data.subarray(1), artistFrame ? '\u0000' : '').replace(/\u0000+$/g, '');
+        out[map[id]] = artistFrame ? text.replace(/\u0000/g, ' / ') : text;
+        if (artistFrame && text.includes('\u0000')) out.artistCredits = text.split('\u0000').map(name => name.trim()).filter(Boolean);
+      }
       else if ((id === 'APIC' || id === 'PIC') && !out.pic && !unsync) out.pic = parsePic(data, v22);
       p += hl + fs;
     }
   } catch (e) { console.warn('tags', e); }
+  if (out.pic) { try { out.coverKey = await coverFingerprint(out.pic.data); } catch { /* Group by album metadata if hashing is unavailable. */ } }
   return out;
 }
 function guessType(name) {
@@ -1390,7 +1399,7 @@ async function importFiles(files) {
       const fromName = nameFromFile(f.name, []);
       const t = {
         id, source: 'local', title: tags.title || fromName.title, artist: tags.artist || fromName.artist,
-        album: tags.album || '', albumArtist: tags.albumArtist || '', trackNumber: tags.trackNumber || '', discNumber: tags.discNumber || '', named: tags.title ? 'tags' : '',
+        album: tags.album || '', albumArtist: tags.albumArtist || '', artistCredits: tags.artistCredits || null, coverKey: hasArt ? tags.coverKey || '' : '', trackNumber: tags.trackNumber || '', discNumber: tags.discNumber || '', named: tags.title ? 'tags' : '',
         duration: await probeDuration(f), hasArt, added: Date.now(), saved: Date.now(), size: buf.byteLength, fname: f.name,
       };
       await saveTrack(t);
@@ -1630,7 +1639,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 29</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 30</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${appearanceSettingsHTML()}
@@ -2133,6 +2142,7 @@ async function init() {
   render();
   renderPlayer();
   restorePlaylistDownloads();
+  backfillCoverKeys();
   if (S.tab === 'search') doSearch();
   if (justConnected) {
     // first connect, or more than 6 h since the last sync: refresh the song list

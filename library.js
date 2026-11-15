@@ -6,34 +6,127 @@ function visibleLibraryTracks() { return [...S.tracks.values()].filter(canBrowse
 function visiblePlaylistTracks(playlist) { return playlist.ids.map(id => S.tracks.get(id)).filter(canBrowseTrack); }
 function visiblePlaylists() { return navigator.onLine ? S.playlists : S.playlists.filter(p => visiblePlaylistTracks(p).length); }
 
+// Credit separators describe collaborations, not new artist identities.
+function collectionKey(value) {
+  return String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+}
+function realArtistName(value) {
+  return !!value && !/^(?:unknown(?: artist)?|various(?: artists)?|va|music|songs|tunebox|n\/a)$/i.test(value.trim());
+}
+function splitArtistCredit(value, protectedNames = []) {
+  let text = String(value || '').trim();
+  if (!text) return [];
+  // Catalog credits can explicitly identify a band whose name contains punctuation.
+  const held = [];
+  for (const name of [...new Set(['AC/DC', 'Earth, Wind & Fire', 'Tyler, The Creator', 'Florence + The Machine', 'Bigflo & Oli', 'Young T & Bugsey', ...protectedNames])].sort((a, b) => b.length - a.length)) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    text = text.replace(new RegExp('(?<![\\p{L}\\p{N}])' + escaped + '(?![\\p{L}\\p{N}])', 'giu'), match => {
+      held.push(match); return '\uE000' + (held.length - 1) + '\uE001';
+    });
+  }
+  return text.replace(/\b(?:featuring|feat|ft)\.?\s+/gi, ';').split(/\s*(?:[;,/\\&+]|\s+(?:and|x|with)\s+)\s*/i)
+    .map(name => name.replace(/\uE000(\d+)\uE001/g, (_, i) => held[+i]).replace(/^[\s([]+|[\s)\]]+$/g, '').trim())
+    .filter(realArtistName);
+}
+function trackArtistNames(track, protectedNames = [], split = value => splitArtistCredit(value, protectedNames)) {
+  const structured = Array.isArray(track.artistCredits) ? track.artistCredits.map(a => typeof a === 'string' ? a : a?.name).filter(realArtistName) : [];
+  const names = structured.length ? structured : [...split(track.artist)];
+  // Featured guests are often only written in the title's credits.
+  for (const match of String(track.title || '').matchAll(/\b(?:featuring|feat|ft)\.?\s+([^)\]\r\n]+)/gi)) names.push(...split(match[1]));
+  return [...new Map(names.map(name => [collectionKey(name), name])).values()];
+}
+function albumArtworkKey(track) {
+  if (track.coverKey) return 'image:' + track.coverKey;
+  if (!track.art || !/^https?:\/\//i.test(track.art)) return '';
+  try {
+    const url = new URL(track.art);
+    if (/(?:^|[/_.-])(?:placeholder|default|no[-_]?cover|unknown)(?:[_.-]|$)/i.test(url.pathname)) return '';
+    // The same catalog cover is served from several CDN hosts and at different sizes.
+    if (/(?:^|\.)mzstatic\.com$/i.test(url.hostname)) return 'apple-art:' + url.pathname.replace(/\/\d+x\d+[^/]*$/, '');
+    for (const parameter of ['w', 'h', 'width', 'height', 'size']) url.searchParams.delete(parameter);
+    return 'art:' + url.host.toLowerCase() + url.pathname + (url.searchParams.size ? '?' + url.searchParams.toString() : '');
+  } catch { return ''; }
+}
 function musicCollections() {
   const albums = new Map(), artists = new Map();
-  const key = value => String(value || '').normalize('NFKC').trim().toLocaleLowerCase();
-  for (const track of S.tracks.values()) {
-    if (!ownMusic(track) || !canBrowseTrack(track)) continue;
-    const artist = String(track.artist || '').trim() || 'Unknown artist';
-    const albumArtist = String(track.albumArtist || artist).trim() || artist;
-    const album = String(track.album || '').trim();
-    const artistId = key(artist), albumId = JSON.stringify([key(albumArtist), key(album)]);
-    if (!albums.has(albumId)) albums.set(albumId, { id: albumId, title: album || 'Singles & other songs', artist: albumArtist, artistIds: new Set(), tracks: [], liked: 0, recent: 0 });
-    if (!artists.has(artistId)) artists.set(artistId, { id: artistId, title: artist, tracks: [], albums: [] });
-    const group = albums.get(albumId);
-    group.artistIds.add(artistId);
-    group.tracks.push(track); group.liked += !!track.liked; group.recent = Math.max(group.recent, track.lastPlayed || track.added || 0);
-    artists.get(artistId).tracks.push(track);
-  }
-  for (const album of albums.values()) {
-    album.tracks.sort((a, b) => (parseInt(a.discNumber) || 1) - (parseInt(b.discNumber) || 1)
+  const tracks = [...S.tracks.values()].filter(t => ownMusic(t) && canBrowseTrack(t));
+  const protectedNames = [...new Set(tracks.flatMap(t => Array.isArray(t.artistCredits) ? t.artistCredits.map(a => typeof a === 'string' ? a : a?.name).filter(Boolean) : []))]
+    .filter(name => /[;,/\\&+]|\s(?:and|x|with)\s/i.test(name));
+  const creditCache = new Map();
+  const split = value => { if (!creditCache.has(value)) creditCache.set(value, splitArtistCredit(value, protectedNames)); return creditCache.get(value); };
+  const entries = tracks.map(track => {
+    const names = trackArtistNames(track, protectedNames, split);
+    const albumArtist = /^(?:various(?: artists)?|va)$/i.test(String(track.albumArtist || '').trim()) ? 'Various Artists'
+      : split(track.albumArtist)[0] || names[0] || 'Unknown artist';
+    const title = String(track.album || '').replace(/\s+-\s+(?:Single|EP)$/i, '').trim();
+    const keys = [albumArtworkKey(track), track.catalogAlbumId ? 'release:' + track.catalogAlbumId : '',
+      'metadata:' + JSON.stringify([collectionKey(albumArtist), collectionKey(title)])].filter(Boolean);
+    return { track, names, albumArtist, title, keys };
+  });
+  const parent = entries.map((_, i) => i), aliases = new Map();
+  const root = i => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  entries.forEach((entry, i) => entry.keys.forEach(key => {
+    // Missing album names must not bridge two distinct real covers/releases.
+    if (!entry.title && key.startsWith('metadata:') && entry.keys.length > 1) return;
+    if (aliases.has(key)) parent[root(i)] = root(aliases.get(key)); else aliases.set(key, i);
+  }));
+  const grouped = new Map();
+  entries.forEach((entry, i) => { const id = root(i); if (!grouped.has(id)) grouped.set(id, []); grouped.get(id).push(entry); });
+  const mostCommon = values => {
+    const votes = new Map();
+    for (const value of values.filter(Boolean)) { const id = collectionKey(value), vote = votes.get(id) || { value, count: 0 }; vote.count++; votes.set(id, vote); }
+    return [...votes.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))[0]?.value;
+  };
+  for (const members of grouped.values()) {
+    const keys = [...new Set(members.flatMap(e => e.keys))];
+    const id = keys.filter(k => !k.startsWith('metadata:')).sort()[0] || keys.sort()[0];
+    const group = { id, title: mostCommon(members.map(e => e.title)) || 'Singles & other songs',
+      artist: mostCommon(members.map(e => e.track.albumArtist || e.albumArtist)) || 'Unknown artist',
+      artistIds: new Set(), tracks: members.map(e => e.track), liked: 0, recent: 0 };
+    albums.set(id, group);
+    for (const { track, names } of members) {
+      group.liked += !!track.liked; group.recent = Math.max(group.recent, track.lastPlayed || track.added || 0);
+      for (const name of names) {
+        const artistId = collectionKey(name);
+        if (!artists.has(artistId)) artists.set(artistId, { id: artistId, title: name, tracks: [], albums: [] });
+        const artist = artists.get(artistId);
+        if (artist.title === artist.title.toUpperCase() && name !== name.toUpperCase()) artist.title = name;
+        artist.tracks.push(track); group.artistIds.add(artistId);
+      }
+    }
+    group.tracks.sort((a, b) => (parseInt(a.discNumber) || 1) - (parseInt(b.discNumber) || 1)
       || (parseInt(a.trackNumber) || 9999) - (parseInt(b.trackNumber) || 9999)
       || a.title.localeCompare(b.title, undefined, { numeric: true }));
-    album.cover = album.tracks.find(hasCover) || album.tracks[0];
-    for (const id of album.artistIds) artists.get(id).albums.push(album);
+    group.cover = group.tracks.find(hasCover) || group.tracks[0];
+    for (const artistId of group.artistIds) artists.get(artistId).albums.push(group);
   }
   for (const artist of artists.values()) {
     artist.albums.sort((a, b) => a.title.localeCompare(b.title));
     artist.cover = artist.tracks.find(hasCover) || artist.tracks[0];
   }
   return { albums, artists };
+}
+async function coverFingerprint(bytes) {
+  if (!crypto.subtle) return '';
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+async function backfillCoverKeys() {
+  let changed = false;
+  for (const track of S.tracks.values()) {
+    if (!ownMusic(track) || !track.hasArt || track.art || track.coverKey) continue;
+    try {
+      const blob = await getBlob(track.id + '#art');
+      if (!blob) continue;
+      const key = await coverFingerprint(await blob.arrayBuffer());
+      if (key && !track.coverKey && !track.art && S.tracks.get(track.id) === track) { track.coverKey = key; await saveTrack(track); changed = true; }
+    } catch { /* Older covers can still group by album metadata. */ }
+  }
+  if (changed && S.tab === 'library' && !document.body.classList.contains('overlay-open')) {
+    const top = pageScroll.scrollTop, compact = document.body.classList.contains('dock-compact');
+    render(); scrollPageTo(0, top); if (compact) setDockCompact(true, 'collections');
+  }
 }
 function albumCard(album) {
   return `<button class="card collection-card" data-act="open" data-type="album" data-id="${esc(album.id)}" data-reference="${esc(album.cover.id)}">${art(album.cover, 'card-art')}<span class="t">${esc(album.title)}</span><span class="a">${esc(album.artist)}</span></button>`;
