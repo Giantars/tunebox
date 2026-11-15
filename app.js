@@ -1500,6 +1500,8 @@ function isStandalone() { return navigator.standalone === true || matchMedia('(d
 function viewHome() { return renderPersonalHome(); }
 
 function searchSource() { return navigator.onLine ? S.source : 'mine'; }
+// Fold accents on both sides of a search without changing displayed metadata.
+function searchText(value) { return String(value ?? '').normalize('NFD').replace(/\p{M}/gu, '').toLowerCase(); }
 function viewSearch() {
   return `<h1>Search<span class="offline-pill">Offline</span></h1>
     <div class="seg">
@@ -1533,9 +1535,9 @@ async function doSearch() {
   S.searchErr = '';
   if (searchSource() === 'mine') {
     S.searching = false;
-    const ql = q.toLowerCase();
+    const ql = searchText(q);
     S.results = visibleLibraryTracks()
-      .filter(t => !ql || (t.title + ' ' + t.artist + ' ' + (t.album || '')).toLowerCase().includes(ql))
+      .filter(t => !ql || searchText(t.title + ' ' + t.artist + ' ' + (t.album || '')).includes(ql))
       .sort((a, b) => (b.lastPlayed || b.added || 0) - (a.lastPlayed || a.added || 0)).slice(0, 200);
     renderResults();
     return;
@@ -1628,7 +1630,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 28</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 29</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${appearanceSettingsHTML()}
