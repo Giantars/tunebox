@@ -10,20 +10,35 @@ function catalogEntry(entry) {
     artistCredits: names, album: clean(entry.album), albumArtist: clean(entry.albumArtist),
     catalogAlbumId: clean(entry.catalogAlbumId), art: /^https:\/\//i.test(entry.art || '') ? clean(entry.art) : '',
     duration: Number.isFinite(+entry.duration) && +entry.duration > 0 && +entry.duration < 86400 ? +entry.duration : 0,
-    trackNumber: clean(String(entry.trackNumber || '')), discNumber: clean(String(entry.discNumber || '')) };
+    trackNumber: clean(String(entry.trackNumber || '')), discNumber: clean(String(entry.discNumber || '')),
+    bpm: +entry.bpm >= 40 && +entry.bpm <= 220 ? +entry.bpm : 0,
+    tempoConfidence: +entry.tempoConfidence >= 0 && +entry.tempoConfidence <= 1 ? +entry.tempoConfidence : 0,
+    energy: +entry.energy >= 0 && +entry.energy <= 1 ? +entry.energy : 0,
+    featureSource: clean(entry.featureSource), releaseDate: clean(entry.releaseDate), releaseArtist: clean(entry.releaseArtist),
+    releaseDiscoveredAt: Number.isFinite(+entry.releaseDiscoveredAt) && +entry.releaseDiscoveredAt <= Date.now() + 864e5 ? +entry.releaseDiscoveredAt : 0 };
 }
 async function applyDriveCatalog(document) {
   if (document?.schema !== 1 || document.source !== 'tunebox-uploader' || !Array.isArray(document.tracks) || document.tracks.length > 100000) return 0;
   const byDriveId = new Map([...S.tracks.values()].filter(t => t.source === 'drive').map(t => [t.rid, t]));
+  const knownLibrary = document.tracks.some(entry => byDriveId.has(entry?.driveId));
+  if (document.releaseWatch && typeof document.releaseWatch.enabled === 'boolean') store.set('releaseWatch', document.releaseWatch);
   const changed = [];
   for (const raw of document.tracks) {
-    const entry = catalogEntry(raw), track = entry && byDriveId.get(entry.driveId);
+    const entry = catalogEntry(raw);
+    let track = entry && byDriveId.get(entry.driveId);
+    if (!track && knownLibrary && entry?.releaseArtist && entry.releaseDiscoveredAt > Date.now() - 30 * 864e5) {
+      track = { id: 'gd:' + entry.driveId, rid: entry.driveId, source: 'drive', added: Date.now() };
+      byDriveId.set(entry.driveId, track); S.tracks.set(track.id, track);
+    }
     if (!track) continue;
     const before = JSON.stringify(track);
     // These credits are from the exact recording uploaded, not a name search.
     for (const key of ['title', 'artist', 'album', 'albumArtist', 'catalogAlbumId', 'trackNumber', 'discNumber']) if (entry[key]) track[key] = entry[key];
     if (entry.artistCredits.length) track.artistCredits = entry.artistCredits;
     if (entry.duration && !track.duration) track.duration = entry.duration;
+    if (entry.bpm) { track.bpm = entry.bpm; track.tempoConfidence = entry.tempoConfidence; track.energy = entry.energy; track.featureSource = entry.featureSource; }
+    if (entry.releaseDate) track.releaseDate = entry.releaseDate;
+    if (entry.releaseArtist) { track.releaseArtist = entry.releaseArtist; track.releaseDiscoveredAt = entry.releaseDiscoveredAt; }
     if (!track.hasArt && entry.art) { track.art = entry.art; track.artFailed = false; }
     track.metadataSource = 'drive-catalog'; track.named = 'drive-catalog';
     if (entry.art || track.hasArt) {
@@ -63,7 +78,7 @@ async function refreshDriveCatalog(ids = null, force = false) {
       lastDriveCatalogCheck = Date.now();
       if (count) {
         const top = pageScroll.scrollTop, compact = document.body.classList.contains('dock-compact');
-        if (S.tab === 'library' && !document.body.classList.contains('overlay-open')) {
+        if (['home', 'library'].includes(S.tab) && !document.body.classList.contains('overlay-open') && S.sub?.type !== 'mix-editor') {
           render({ background: true }); scrollPageTo(0, top); if (compact) setDockCompact(true, 'covers');
         }
         renderPlayer(); updateLookupStatus();

@@ -7,7 +7,7 @@
   let searchSession = false, referenceHeight = restingHeight, referenceWidth = innerWidth;
   let opening = false, openingTimer = null;
   function syncKeyboard(size) {
-    const focused = document.activeElement?.id === 'q';
+    const focused = ['q', 'mixQuery'].includes(document.activeElement?.id);
     const touchScreen = matchMedia('(pointer:coarse)').matches || /iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (focused && !searchSession) {
       searchSession = true;

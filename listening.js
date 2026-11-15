@@ -7,6 +7,7 @@ function fillAutoplay() {
       || S.queue.length - S.qi - 1 > 3) return false;
   const future = new Set(S.queue.slice(S.qi).map(t => t.id));
   const library = [...S.tracks.values()].filter(t => ['drive', 'local'].includes(t.source)
+    && (!S.activeMix || matchesHomeMix(t, S.activeMix))
     && canBrowseTrack(t) && (isDownloadedTrack(t) || (t.source === 'drive' && !!gdToken())));
   const recent = new Set(S.queue.slice(Math.max(0, S.qi - Math.min(15, library.length - 2)), S.qi).map(t => t.id));
   let candidates = library.filter(t => !future.has(t.id) && !recent.has(t.id));

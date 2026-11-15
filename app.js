@@ -1026,7 +1026,7 @@ const isSilent = () => SILENT && audio.src === SILENT;
 const hasRealSrc = () => !curIsYT() && !!audio.src && audio.src !== location.href && !isSilent();
 
 let playToken = 0, curObjUrl = null, retries = 0;
-function playList(arr, i) {
+function playList(arr, i, options = {}) {
   if (!arr || !arr.length) return;
   let q = arr.map(canon);
   const selected = q[i];
@@ -1041,6 +1041,7 @@ function playList(arr, i) {
     i = 0;
   }
   S.queue = q;
+  S.activeMix = HOME_MIXES[options.mix] ? options.mix : null;
   S.qi = -1;
   S.pn = 0;
   playIndex(i);
@@ -1192,7 +1193,7 @@ function addToQueue(t) {
 function saveQueue() {
   schedulePreparation();
   const slim = t => ({ id: t.id, source: t.source, rid: t.rid, title: t.title, artist: t.artist, album: t.album, duration: t.duration, art: t.art, audio: t.audio });
-  store.set('queue', { q: S.queue.map(slim), qi: S.qi, pn: S.pn, pos: hasRealSrc() || (curIsYT() && ytLoaded()) ? engTime() : S.restorePos || 0 });
+  store.set('queue', { mix: S.activeMix || null, q: S.queue.map(slim), qi: S.qi, pn: S.pn, pos: hasRealSrc() || (curIsYT() && ytLoaded()) ? engTime() : S.restorePos || 0 });
 }
 function restoreQueue() {
   const s = store.get('queue', null);
@@ -1201,6 +1202,7 @@ function restoreQueue() {
   S.qi = Math.max(0, Math.min(Number(s.qi) || 0, S.queue.length - 1));
   S.pn = Math.max(0, Math.min(Number(s.pn) || 0, S.queue.length - S.qi - 1));
   S.restorePos = s.pos || 0;
+  S.activeMix = HOME_MIXES[s.mix] ? s.mix : null;
 }
 
 /* stall / error recovery: the fix for "song stops" and "stuck repeating sound" */
@@ -1480,6 +1482,7 @@ async function addToPlaylist(p, t) {
 
 /* ---------------- UI: icons ---------------- */
 const ICONS = {
+  pin: ['s', '<path d="M8 3h8l-1 6 4 4H5l4-4-1-6ZM12 13v8"/>'],
   album: ['s', '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/>'],
   artist: ['s', '<circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/>'],
   grip: ['s', '<path d="M7 8h10M7 12h10M7 16h10"/>'],
@@ -1596,6 +1599,7 @@ async function doSearch() {
 function listFor(sub) {
   const all = visibleLibraryTracks();
   switch (sub.type) {
+    case 'mix': return HOME_MIXES[sub.id] ? { title: HOME_MIXES[sub.id].title, arr: homeMixTracks(sub.id), mix: sub.id, empty: 'Choose a few songs to start this mix. Tempo matches will join as they become available.' } : null;
     case 'album': {
       const album = resolveMusicCollection(musicCollections().albums, sub);
       return album ? { title: album.title, arr: album.tracks, subtitle: album.artist, cover: album.cover } : navigator.onLine ? null : { title: 'Album', arr: [], empty: 'No songs in this album are downloaded yet.' };
@@ -1640,14 +1644,17 @@ function viewLibrary() {
   return h;
 }
 function viewList() {
+  if (S.sub.type === 'mix-editor') return viewMixEditor(S.sub.id);
   if (['albums', 'artists', 'artist'].includes(S.sub.type)) return viewCollections();
   const L = listFor(S.sub);
   if (!L) { S.sub = null; return viewLibrary(); }
-  const key = ['pl', 'album'].includes(S.sub.type) ? S.sub.type + ':' + S.sub.id : S.sub.type;
+  const key = ['pl', 'album', 'mix'].includes(S.sub.type) ? S.sub.type + ':' + S.sub.id : S.sub.type;
   let h = `<button class="backbar" data-act="back">${icon('back')}${libraryBackLabel()}</button>
     <div class="titlebar"><h1>${esc(L.title)}</h1>${L.pl ? `<button class="icon more" data-act="pl-menu" data-id="${esc(L.pl.id)}">${icon('more')}</button>` : ''}</div>`;
   if (L.cover) h += `<div class="album-detail">${art(L.cover, 'album-detail-art')}<p class="small">${esc(L.subtitle)} · ${L.arr.length} songs</p></div>`;
-  if (L.pl) h += playlistProgressHTML(L.pl);
+  if (L.cover) h += homePinButton('album', S.sub.id, L.cover.id);
+  if (L.mix) h += mixDetailHTML(L.mix);
+  if (L.pl) h += homePinButton('pl', L.pl.id) + playlistProgressHTML(L.pl);
   if (S.sub.type === 'offline') h += libraryDownloadHTML() + `<div data-download-jobs>${downloadJobsHTML()}</div><p class="small">Tap a song’s play button to listen. Scroll anywhere else safely.</p>`;
   if (S.sub.type === 'local') h += `<div class="list-head"><button class="btn primary" data-act="import">${icon('plus')}Add music files</button></div>`;
   if (S.sub.type === 'drive' && settings.gClientId) {
@@ -1663,9 +1670,10 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 32</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 33</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
+  ${releaseWatchHTML()}
   ${appearanceSettingsHTML()}
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Drive songs you play are kept on this phone. YouTube videos stay online.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
@@ -1726,6 +1734,7 @@ function render({ background = false } = {}) {
   if (background) patchContent(v, h); else v.innerHTML = h;
   if (S.tab === 'search') renderResults();
   if (S.tab === 'settings') updateStorageInfo();
+  if (S.sub?.type === 'mix-editor') renderMixCandidates();
   observeVisibleCovers();
 }
 let rrTimer = null;
@@ -1974,6 +1983,7 @@ function trackMenu(t, ctx = {}) {
     { label: t.liked ? 'Remove from Liked' : 'Like', fn: () => toggleLike(t) },
     { label: 'Add to playlist…', fn: () => playlistPicker(t) },
   ];
+  if (ownMusic(t)) items.push({ label: 'Choose mood mix', fn: () => moodMenu(t) });
   if (t.source !== 'local' && t.source !== 'youtube') {
     if (S.cached.has(t.id)) items.push({ label: 'Remove download', fn: async () => { await removeDownload(t); toast('Download removed'); render(); renderPlayer(); } });
     else if (!S.downloading.has(t.id)) items.push({ label: 'Save for offline', fn: () => { cacheTrack(canon(t), true); toast('Saving…'); } });
@@ -2023,8 +2033,13 @@ function playlistMenu(p) {
 }
 
 /* ---------------- Events ---------------- */
-const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev', 'resume-current']);
+const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev', 'resume-current', 'release-play']);
 const actions = {
+  'home-pin': el => toggleHomePin(el.dataset.type, el.dataset.id, el.dataset.reference),
+  'release-play': el => playRelease(el.dataset.id),
+  'save-mix': el => saveHomeMix(el.dataset.id),
+  'mix-edit': el => { S.libraryTrail.push({ ...S.sub }); S.sub = { type: 'mix-editor', id: el.dataset.id }; mixQuery = ''; resetPageScroll(); render(); },
+  'mix-pick': async el => { const track = S.tracks.get(el.dataset.id); await setTrackMood(track, el.dataset.mix, !matchesHomeMix(track, el.dataset.mix)); renderMixCandidates(); },
   'download-library': () => resumeLibraryDownload(true),
   'pause-library': () => pauseLibraryDownload(),
   appearance: el => openThemePreview(el.dataset.theme),
@@ -2040,7 +2055,7 @@ const actions = {
     if (S.tab === 'search' && !S.results.length && !S.searching) doSearch();
     scrollPageTo(0, 0);
   },
-  play: el => playList(S.lists[el.dataset.list], +el.dataset.i),
+  play: el => playList(S.lists[el.dataset.list], +el.dataset.i, { mix: mixForList(el.dataset.list) }),
   'q-play': el => playIndex(+el.dataset.i),
   more: el => trackMenu((S.lists[el.dataset.list] || [])[+el.dataset.i], { list: el.dataset.list, i: +el.dataset.i }),
   'open-np': () => openNP(),
@@ -2061,12 +2076,12 @@ const actions = {
     resetPageScroll(); S.tab = 'library'; S.sub = { type: el.dataset.type, id: el.dataset.id, reference: el.dataset.reference }; render(); scrollPageTo(0, 0);
   },
   back: () => { resetPageScroll(); S.sub = S.libraryTrail.pop() || null; render(); },
-  'play-all': el => { const a = S.lists[el.dataset.list]; if (a && a.length) { if (S.shuffle) toggleShuffle(); playList(a, 0); } },
+  'play-all': el => { const a = S.lists[el.dataset.list]; if (a && a.length) { if (S.shuffle) toggleShuffle(); playList(a, 0, { mix: mixForList(el.dataset.list) }); } },
   'shuffle-all': el => {
     const a = S.lists[el.dataset.list];
     if (!a || !a.length) return;
     if (!S.shuffle) { S.shuffle = true; store.set('shuffle', true); }
-    playList(a, Math.floor(Math.random() * a.length));
+    playList(a, Math.floor(Math.random() * a.length), { mix: mixForList(el.dataset.list) });
   },
   'new-pl': () => newPlaylist(null),
   'pl-menu': el => { const p = S.playlists.find(x => x.id === el.dataset.id); if (p) playlistMenu(p); },
@@ -2117,6 +2132,7 @@ document.addEventListener('click', e => {
   if (f) { e.preventDefault(); f(el, e); }
 });
 document.addEventListener('input', e => {
+  if (e.target.id === 'mixQuery') { mixQuery = e.target.value; renderMixCandidates(); }
   if (e.target.id === 'wallpaperBrightness') updateWallpaperBrightness(e.target.value);
   if (e.target.id === 'previewBrightness') updateWallpaperBrightness(e.target.value, true);
   if (e.target.id === 'q') {
