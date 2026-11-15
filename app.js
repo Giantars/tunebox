@@ -354,9 +354,9 @@ function doCache(t, { store: doStore = true } = {}) {
     if (c.source === 'drive' && !c.tagged) await applyTags(c, blob);
     if (doStore) {
       await DB.put('blobs', { buf, type, size: buf.byteLength }, t.id);
-      if (c.art && !c.hasArt) queueArtworkSave(c);
       Object.assign(c, { saved: Date.now(), size: buf.byteLength });
       S.cached.add(t.id);
+      if (c.art && !c.hasArt) queueArtworkSave(c);
       notePlaylistDownload(t.id, null);
       requestPersist();
     }
@@ -376,7 +376,7 @@ function prioritizeArtworkJobs() {
   artworkJobs.sort((a, b) => priority(b) - priority(a));
 }
 function queueArtworkSave(c) {
-  if (!c?.art || c.hasArt || c.artFailed) return;
+  if (!c?.art || c.hasArt || c.artFailed || !S.cached.has(c.id)) return;
   const key = c.id + '|' + c.art;
   if (artworkPending.has(key)) return;
   artworkPending.add(key); artworkJobs.push({ id: c.id, url: c.art, key });
@@ -386,7 +386,7 @@ function pumpArtworkSaves() {
   if (!navigator.onLine) return;
   while (artworkWorkers < 2 && artworkJobs.length) {
     const job = artworkJobs.shift(), c = S.tracks.get(job.id);
-    if (!c || c.art !== job.url || c.hasArt) { artworkPending.delete(job.key); continue; }
+      if (!c || c.art !== job.url || c.hasArt || !S.cached.has(c.id)) { artworkPending.delete(job.key); continue; }
     artworkWorkers++;
     (async () => {
       try {
@@ -428,7 +428,7 @@ async function storeArtFromUrl(c) {
   const url = c.art;
   try {
     const data = await artworkBytes(url);
-    if (!S.tracks.has(c.id) || c.art !== url) return false;
+    if (!S.tracks.has(c.id) || c.art !== url || !S.cached.has(c.id)) return false;
     await DB.put('blobs', data, c.id + '#art');
     if (!S.tracks.has(c.id) || c.art !== url) return false;
     c.hasArt = true;
@@ -439,10 +439,11 @@ async function storeArtFromUrl(c) {
 async function applyTags(c, blob) {
   c.tagged = 1;
   const tags = await readTags(blob);
-  if (tags.title) { c.title = tags.title; c.named = 'tags'; }
-  if (tags.artist) { c.artist = tags.artist; c.artistCredits = tags.artistCredits || null; }
-  if (tags.album) c.album = tags.album;
-  for (const key of ['albumArtist', 'trackNumber', 'discNumber']) if (tags[key]) c[key] = tags[key];
+  const exactCatalog = c.metadataSource === 'drive-catalog';
+  if (tags.title && !exactCatalog) { c.title = tags.title; c.named = 'tags'; }
+  if (tags.artist && !exactCatalog) { c.artist = tags.artist; c.artistCredits = tags.artistCredits || null; }
+  if (tags.album && !exactCatalog) c.album = tags.album;
+  for (const key of ['albumArtist', 'trackNumber', 'discNumber']) if (tags[key] && (!exactCatalog || !c[key])) c[key] = tags[key];
   if (tags.pic) {
     try {
       const d = tags.pic.data;
@@ -561,7 +562,7 @@ async function driveSync() {
     const root = await gdJSON(`${GDAPI}/files?q=${encodeURIComponent(`name='${qn}' and mimeType='application/vnd.google-apps.folder' and trashed=false`)}&fields=files(id,name)&pageSize=10`);
     if (!root.files || !root.files.length) { toast(`No folder called "${folder}" in your Google Drive`); return; }
     const todo = root.files.map(f => ({ id: f.id, path: [] }));
-    const found = [];
+    const found = [], catalogs = [];
     while (todo.length) {
       const dir = todo.shift();
       let pt = '';
@@ -570,6 +571,7 @@ async function driveSync() {
         const j = await gdJSON(`${GDAPI}/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,size)&pageSize=1000${pt ? '&pageToken=' + pt : ''}`);
         for (const f of j.files || []) {
           if (f.mimeType === 'application/vnd.google-apps.folder') todo.push({ id: f.id, path: [...dir.path, f.name] });
+          else if (f.name === DRIVE_CATALOG_NAME) catalogs.push(f.id);
           else if ((f.mimeType || '').startsWith('audio/') || AUDIO_EXT.test(f.name)) found.push({ ...f, path: dir.path });
         }
         pt = j.nextPageToken || '';
@@ -579,11 +581,13 @@ async function driveSync() {
     for (const f of found) {
       const id = 'gd:' + f.id;
       seen.add(id);
-      if (S.tracks.has(id)) { enqueueLookup(S.tracks.get(id)); continue; }
+      if (S.tracks.has(id)) continue;
       const n = nameFromFile(f.name, f.path);
       fresh.push({ id, source: 'drive', rid: f.id, ...n, duration: 0, size: +f.size || 0, ext: (f.name.split('.').pop() || 'mp3').toLowerCase(), fname: f.name, added: Date.now() });
     }
-    if (fresh.length) { await DB.putMany('tracks', fresh); fresh.forEach(t => { S.tracks.set(t.id, t); enqueueLookup(t); }); }
+    if (fresh.length) { await DB.putMany('tracks', fresh); fresh.forEach(t => S.tracks.set(t.id, t)); }
+    await refreshDriveCatalog(catalogs, true);
+    queueRemainingCoverLookups();
     let removed = 0;
     for (const t of [...S.tracks.values()]) {
       if (t.source === 'drive' && !seen.has(t.id)) { await deleteLocal(t); removed++; }
@@ -877,6 +881,7 @@ async function lookupOne(c) {
   if (!best) best = brainzTried ? metadataOnly : await brainz();
   if (!S.tracks.has(c.id) || !settings.lookup) return;
   if (best) rememberCatalogMatches([best]);
+  if (c.metadataSource === 'drive-catalog' && hasCover(c)) return;
   c.looked = 1; c.lookupVersion = LOOKUP_VERSION;
   c.lookupStatus = best ? 'matched' : fallbackFailed ? 'error' : 'unmatched';
   c.lookupRetryAt = best ? 0 : Date.now() + (fallbackFailed ? 60000 : 86400000);
@@ -1261,7 +1266,8 @@ window.addEventListener('online', () => {
   resumePlaylistDownloads();
   document.body.classList.remove('offline');
   if (hasRealSrc() && !audio.src.startsWith('blob:') && audio.paused === false && audio.readyState < 3) recover('stall');
-  [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
+  refreshDriveCatalog().finally(queueRemainingCoverLookups);
+  [...S.tracks.values()].forEach(t => queueArtworkSave(t));
   pumpLookup(); pumpArtworkSaves();
   refreshNetworkLibrary();
 });
@@ -1272,7 +1278,8 @@ document.addEventListener('visibilitychange', () => {
   prepareUpcoming();
   if (document.hidden) return;
   resumePlaylistDownloads();
-  [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
+  refreshDriveCatalog().finally(queueRemainingCoverLookups);
+  [...S.tracks.values()].forEach(t => queueArtworkSave(t));
   prioritizeVisibleCovers(); pumpArtworkSaves();
 });
 
@@ -1639,7 +1646,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 30</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 31</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${appearanceSettingsHTML()}
@@ -1650,7 +1657,7 @@ function viewSettings() {
     <input id="gFolder" class="field" placeholder="Tunebox" value="${esc(settings.gFolder)}" autocapitalize="off" autocorrect="off" spellcheck="false">
     <div class="small" style="margin-bottom:10px">${gdToken() ? 'Connected.' : store.get('gdEver', false) ? 'Signed out (Google sign-ins last about an hour; saved songs still play).' : 'Not connected yet.'}</div>
     <div class="list-head"><button class="btn" data-act="save-gd">Save</button><button class="btn primary" data-act="gd-sync">${gdToken() ? 'Sync now' : 'Connect'}</button></div></div>
-  <div class="group"><label class="set-row"><span>Find covers and song names online<small>Checks song names and featured artists against music catalogs. Large libraries take time; keep Tunebox open while it works.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label><p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p><button class="btn inline" data-act="retry-lookup" ${settings.lookup ? '' : 'disabled'}>Retry missing covers</button></div>
+  <div class="group"><label class="set-row"><span>Find covers and song names online<small>Drive cover links prepared on your laptop load together when you open Tunebox. Other songs are matched online. Offline covers are saved with downloaded songs.</small></span><input type="checkbox" class="switch" id="lookup" ${settings.lookup ? 'checked' : ''}></label><p class="small" data-lookup-status role="status" aria-live="polite">${esc(lookupStatusText())}</p><button class="btn inline" data-act="retry-lookup" ${settings.lookup ? '' : 'disabled'}>Retry missing covers</button></div>
   <div class="group"><div class="set-head">YouTube key</div>
     <div class="small">Free, no card needed. At <a href="https://console.cloud.google.com" target="_blank" rel="noopener">console.cloud.google.com</a>: create a project, enable <b>YouTube Data API v3</b>, then Credentials, Create credentials, API key. About 100 new searches a day; repeat searches are remembered and cost nothing.</div>
     <input id="ytKey" class="field" placeholder="AIza…" value="${esc(settings.ytKey)}" autocapitalize="off" autocorrect="off" spellcheck="false">
@@ -2130,9 +2137,9 @@ async function init() {
   try {
     const [tr, keys, pls] = await Promise.all([DB.all('tracks'), DB.keys('blobs'), DB.all('playlists')]);
     tr.forEach(t => S.tracks.set(t.id, t));
-    tr.forEach(t => queueArtworkSave(t));
     rememberCatalogMatches(tr.filter(t => t.named === 'catalog' && t.art && !t.artFailed).map(t => ({ trackName: t.title, artistName: t.artist, collectionName: t.album, artworkUrl500: t.art, catalogSource: t.metadataSource, sourceUrl: t.metadataUrl, trackTimeMillis: (t.duration || 0) * 1000 })));
     keys.forEach(k => { if (!String(k).endsWith('#art')) S.cached.add(k); });
+    tr.forEach(t => queueArtworkSave(t));
     S.playlists = pls.sort((a, b) => a.created - b.created);
   } catch (e) { toast('Storage unavailable: ' + e.message); }
   restoreQueue();
@@ -2149,8 +2156,8 @@ async function init() {
     if (Date.now() - store.get('gdLastSync', 0) > 6 * 36e5) driveSync();
     else toast('Google Drive connected');
   }
-  // finish cover/name lookups that were interrupted last time
-  [...S.tracks.values()].forEach(t => enqueueLookup(t));
+  // Load covers prepared by the laptop before searching for missing metadata.
+  refreshDriveCatalog().finally(queueRemainingCoverLookups);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     let hadController = !!navigator.serviceWorker.controller;
     let refreshing = false;
