@@ -114,6 +114,7 @@ function playlistProgressHTML(p) {
   return `<div class="playlist-download" data-playlist-progress="${esc(p.id)}"><div class="download-summary"><span>${esc(s.text)}</span>${s.job && !complete && !s.job.paused && s.active ? `<button class="section-link" data-act="pause-pl" data-id="${esc(p.id)}">Pause</button>` : ''}</div><progress max="${s.total || 1}" value="${s.saved}" aria-label="${esc(p.name)} download progress"></progress>${s.skipped ? `<p class="small">${s.skipped} YouTube or online-only songs stay online.</p>` : ''}${needsAuth ? '<p class="small">Connect Google Drive in Settings, then retry.</p>' : ''}${needsStorage ? '<p class="small">Free some space on this device, then retry.</p>' : ''}<button class="btn" data-act="download-pl" data-id="${esc(p.id)}" ${!s.total || complete || (s.active && !s.job?.paused) ? 'disabled' : ''}>${icon(complete ? 'check' : 'download')}${action}</button>${s.job && !complete ? '<p class="small download-note">Keep Tunebox open while songs download.</p>' : ''}</div>`;
 }
 function refreshPlaylistDownloads() {
+  refreshLibraryDownload();
   $$('[data-playlist-progress]').forEach(el => {
     const p = S.playlists.find(p => p.id === el.dataset.playlistProgress);
     if (p) el.outerHTML = playlistProgressHTML(p);
@@ -151,12 +152,13 @@ function pausePlaylistDownload(id) {
   const ids = new Set(p.ids);
   for (let i = dlQueue.length - 1; i >= 0; i--) {
     const t = dlQueue[i];
-    const needed = S.playlists.some(other => other.id !== id && !playlistDownloadJobs.get(other.id)?.paused && playlistDownloadJobs.has(other.id) && other.ids.includes(t.id));
+    const needed = libraryDownloadJob().enabled || S.playlists.some(other => other.id !== id && !playlistDownloadJobs.get(other.id)?.paused && playlistDownloadJobs.has(other.id) && other.ids.includes(t.id));
     if (ids.has(t.id) && !needed && t.id !== curTrack()?.id) { dlQueue.splice(i, 1); S.downloading.delete(t.id); }
   }
   savePlaylistJobs(); refreshPlaylistDownloads(); refreshRows();
 }
 function notePlaylistDownload(id, error) {
+  noteLibraryDownload(id, error);
   for (const p of S.playlists) {
     const job = playlistDownloadJobs.get(p.id);
     if (!job || !p.ids.includes(id)) continue;
@@ -176,9 +178,11 @@ function restorePlaylistDownloads() {
   resumePlaylistDownloads();
 }
 function resumePlaylistDownloads() {
+  resumeLibraryDownload();
   for (const p of S.playlists) if (playlistDownloadJobs.has(p.id)) queuePlaylistJob(p);
 }
 function stopPlaylistDownloads() {
+  pauseLibraryDownload();
   for (const id of playlistDownloadJobs.keys()) pausePlaylistDownload(id);
   playlistDownloadJobs.clear(); savePlaylistJobs();
 }

@@ -109,6 +109,7 @@ if (store.get('gClientId', '') !== GOOGLE_CLIENT_ID) {
 const APPEARANCES = ['dark', 'forest', 'meteor', 'zoro', 'sophie'];
 const WALLPAPERS = { zoro: 'assets/zoro-official.webp', sophie: 'assets/sophie-stars.webp' };
 const settings = {
+  autoplay: store.get('autoplay', true),
   autoSave: store.get('autoSave', true),
   ytKey: store.get('ytKey', ''),
   gClientId: GOOGLE_CLIENT_ID,
@@ -320,7 +321,19 @@ function fetchAudio(t, signal) {
 // Download a song. Returns its Blob; stores it on the phone when doStore. Parallel calls share one download.
 const inflight = new Map();
 function doCache(t, { store: doStore = true } = {}) {
-  if (inflight.has(t.id)) return inflight.get(t.id);
+  if (inflight.has(t.id)) return inflight.get(t.id).then(async blob => {
+    // A manual download can join a playback-only fetch. Keep that download
+    // request even when the original fetch was started with auto-save off.
+    if (doStore && !S.cached.has(t.id)) {
+      const buf = await blob.arrayBuffer(), c = canon(t);
+      await DB.put('blobs', { buf, type: blob.type, size: buf.byteLength }, t.id);
+      Object.assign(c, { saved: Date.now(), size: buf.byteLength });
+      S.cached.add(t.id); await saveTrack(c); notePlaylistDownload(t.id, null);
+      if (c.art && !c.hasArt) queueArtworkSave(c);
+      requestPersist();
+    }
+    return blob;
+  });
   const p = (async () => {
     const ac = new AbortController();
     const tm = setTimeout(() => ac.abort(), 180000);
@@ -447,6 +460,8 @@ async function getBlob(id) {
   return r ? new Blob([r.buf], { type: r.type }) : null;
 }
 async function removeDownload(t) {
+  pauseLibraryDownload();
+  if (preparedAudio.has(t.id)) { URL.revokeObjectURL(preparedAudio.get(t.id)); preparedAudio.delete(t.id); }
   for (const p of S.playlists) if (p.ids.includes(t.id) && playlistDownloadJobs.has(p.id)) pausePlaylistDownload(p.id);
   await DB.del('blobs', t.id);
   await DB.del('blobs', t.id + '#art');
@@ -573,6 +588,7 @@ async function driveSync() {
       if (t.source === 'drive' && !seen.has(t.id)) { await deleteLocal(t); removed++; }
     }
     store.set('gdLastSync', Date.now());
+    resumeLibraryDownload();
     toast(`Google Drive: ${found.length} songs${fresh.length ? ` (${fresh.length} new)` : ''}${removed ? `, ${removed} removed` : ''}`);
     render();
   } catch (e) {
@@ -1030,9 +1046,10 @@ async function playIndex(i, opts = {}) {
     return;
   }
   ytStop();
+  const prepared = takePreparedAudio(t);
   let blob = null;
-  if (isCached) { try { blob = await getBlob(t.id); } catch (e) { console.warn(e); } }
-  if (!blob && t.source === 'drive') {
+  if (!prepared && isCached) { try { blob = await getBlob(t.id); } catch (e) { console.warn(e); } }
+  if (!prepared && !blob && t.source === 'drive') {
     // Drive needs a sign-in header, so the song is downloaded first, then played (and kept if auto-save is on).
     if (curObjUrl) { audio.pause(); }
     renderPlayer();
@@ -1052,12 +1069,12 @@ async function playIndex(i, opts = {}) {
   }
   if (tok !== playToken) return;
   if (curObjUrl) { URL.revokeObjectURL(curObjUrl); curObjUrl = null; }
-  if (blob) { curObjUrl = URL.createObjectURL(blob); audio.src = curObjUrl; }
+  if (prepared || blob) { curObjUrl = prepared || URL.createObjectURL(blob); audio.src = curObjUrl; }
   else if (t.source !== 'local' && t.source !== 'drive' && navigator.onLine) { S.cached.delete(t.id); audio.src = streamUrl(t); }
   else { toast("Can't play " + t.title); return; }
   if (opts.seek) audio.addEventListener('loadedmetadata', () => { try { audio.currentTime = opts.seek; } catch { /* ignore */ } }, { once: true });
   if (opts.autoplay !== false) { const p = audio.play(); if (p) p.catch(e => { if (e.name !== 'AbortError') console.warn('play', e); }); }
-  afterStart(t, i, !!blob);
+  afterStart(t, i, !!(prepared || blob));
 }
 function afterStart(t, i, noSave) {
   S.restorePos = 0;
@@ -1065,11 +1082,12 @@ function afterStart(t, i, noSave) {
   t.plays = (t.plays || 0) + 1;
   saveTrack(t);
   updateMediaSession(t);
+  fillAutoplay();
   saveQueue();
   renderPlayer();
   refreshRows();
   if (settings.autoSave && !noSave) cacheTrack(t, true);
-  if (settings.autoSave && S.queue.length > 1) cacheTrack(S.queue[(i + 1) % S.queue.length]);
+  schedulePreparation();
 }
 function togglePlay() {
   if (curIsYT()) {
@@ -1087,6 +1105,7 @@ function next(auto = false) {
     else { audio.currentTime = 0; audio.play().catch(() => {}); }
     return;
   }
+  fillAutoplay();
   let i = S.qi + 1;
   if (i >= S.queue.length) {
     if (auto && S.repeat !== 'all') { engPause(); if (!curIsYT()) audio.currentTime = 0; renderPlayer(); return; }
@@ -1146,6 +1165,7 @@ function addToQueue(t) {
   saveQueue(); renderQueue(); toast('Added to queue');
 }
 function saveQueue() {
+  schedulePreparation();
   const slim = t => ({ id: t.id, source: t.source, rid: t.rid, title: t.title, artist: t.artist, album: t.album, duration: t.duration, art: t.art, audio: t.audio });
   store.set('queue', { q: S.queue.map(slim), qi: S.qi, pn: S.pn, pos: hasRealSrc() || (curIsYT() && ytLoaded()) ? engTime() : S.restorePos || 0 });
 }
@@ -1190,7 +1210,7 @@ audio.addEventListener('waiting', () => {
 audio.addEventListener('playing', () => { clearTimeout(waitTimer); setStatus(''); renderPlayState(); });
 audio.addEventListener('pause', () => { renderPlayState(); saveQueue(); });
 audio.addEventListener('error', () => { if (hasRealSrc()) recover('error'); });
-audio.addEventListener('ended', () => { if (hasRealSrc()) next(true); });
+audio.addEventListener('ended', () => { if (hasRealSrc() && audio.ended) next(true); });
 audio.addEventListener('loadedmetadata', () => {
   const t = curTrack();
   if (t && isFinite(audio.duration) && audio.duration > 0 && Math.abs((t.duration || 0) - audio.duration) > 2) {
@@ -1242,10 +1262,11 @@ window.addEventListener('online', () => {
   pumpLookup(); pumpArtworkSaves();
   refreshNetworkLibrary();
 });
-window.addEventListener('offline', () => { document.body.classList.add('offline'); refreshNetworkLibrary(); });
+window.addEventListener('offline', () => { document.body.classList.add('offline'); refreshNetworkLibrary(); schedulePreparation(); });
 
 document.addEventListener('visibilitychange', () => {
   document.documentElement.classList.toggle('sky-paused', document.hidden);
+  prepareUpcoming();
   if (document.hidden) return;
   resumePlaylistDownloads();
   [...S.tracks.values()].forEach(t => { enqueueLookup(t); queueArtworkSave(t); });
@@ -1463,10 +1484,10 @@ function fillIcons(root) { $$('[data-icon]', root).forEach(el => { el.innerHTML 
 function row(list, t, i, act = 'play') {
   const c = curTrack();
   const st = S.cached.has(t.id) ? '<span class="dot saved"></span>' : S.downloading.has(t.id) ? '<span class="dot dl"></span>' : '';
-  return `<div class="row${c && c.id === t.id ? ' cur' : ''}" data-act="${act}" data-list="${esc(list)}" data-i="${i}">
+  return `<div class="row${c && c.id === t.id ? ' cur' : ''}" data-list="${esc(list)}" data-i="${i}">
     ${art(t, 'art')}
     <div class="meta"><div class="t">${esc(t.title)}</div><div class="a">${st}<span class="x">${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</span></div></div>
-    <button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button></div>`;
+    <button class="icon song-play" data-act="${act}" data-list="${esc(list)}" data-i="${i}" aria-label="Play ${esc(t.title)}">${icon('play')}</button><button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button></div>`;
 }
 function rows(list, arr, act) {
   arr = arr.filter(canBrowseTrack);
@@ -1592,7 +1613,7 @@ function viewList() {
     <div class="titlebar"><h1>${esc(L.title)}</h1>${L.pl ? `<button class="icon more" data-act="pl-menu" data-id="${esc(L.pl.id)}">${icon('more')}</button>` : ''}</div>`;
   if (L.cover) h += `<div class="album-detail">${art(L.cover, 'album-detail-art')}<p class="small">${esc(L.subtitle)} · ${L.arr.length} songs</p></div>`;
   if (L.pl) h += playlistProgressHTML(L.pl);
-  if (S.sub.type === 'offline') h += `<div data-download-jobs>${downloadJobsHTML()}</div>`;
+  if (S.sub.type === 'offline') h += libraryDownloadHTML() + `<div data-download-jobs>${downloadJobsHTML()}</div><p class="small">Tap a song’s play button to listen. Scroll anywhere else safely.</p>`;
   if (S.sub.type === 'local') h += `<div class="list-head"><button class="btn primary" data-act="import">${icon('plus')}Add music files</button></div>`;
   if (S.sub.type === 'drive' && settings.gClientId) {
     const last = store.get('gdLastSync', 0);
@@ -1607,7 +1628,9 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 27</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 28</p>
+  ${libraryDownloadHTML()}
+  <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${appearanceSettingsHTML()}
   <div class="group"><label class="set-row"><span>Save songs for offline automatically<small>Drive songs you play are kept on this phone. YouTube videos stay online.</small></span><input type="checkbox" class="switch" id="autoSave" ${settings.autoSave ? 'checked' : ''}></label></div>
   <div class="group"><div class="set-head">Google Drive (your own music)</div>
@@ -1956,6 +1979,8 @@ function playlistMenu(p) {
 /* ---------------- Events ---------------- */
 const PLAY_ACTS = new Set(['play', 'toggle-play', 'play-all', 'shuffle-all', 'q-play', 'next', 'prev', 'resume-current']);
 const actions = {
+  'download-library': () => resumeLibraryDownload(true),
+  'pause-library': () => pauseLibraryDownload(),
   appearance: el => openThemePreview(el.dataset.theme),
   'theme-cancel': () => closeThemePreview(false),
   'theme-apply': () => closeThemePreview(true),
@@ -2058,6 +2083,7 @@ document.addEventListener('submit', e => {
   if (e.target.id === 'searchForm') { e.preventDefault(); clearTimeout(sTimer); doSearch(); $('#q').blur(); }
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'autoplay') { settings.autoplay = e.target.checked; store.set('autoplay', settings.autoplay); renderQueue(); }
   if (e.target.id === 'previewMotion' && themePreview) { themePreview.motion = e.target.checked; applyAppearance(themePreview.theme, themePreview.brightness, themePreview.motion); }
   if (e.target.id === 'skyMotion') { settings.skyMotion = e.target.checked; store.set('skyMotion', settings.skyMotion); applyAppearance(); }
   if (e.target.id === 'autoSave') { settings.autoSave = e.target.checked; store.set('autoSave', settings.autoSave); }

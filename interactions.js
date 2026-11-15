@@ -3,6 +3,10 @@
    Movement stays native, and toolbar gestures remain owned by glass.js. */
 (() => {
   let tap = null, compatibilityClick = null;
+  const scrollTimes = new WeakMap();
+  document.addEventListener('scroll', event => {
+    if (event.target instanceof Element) scrollTimes.set(event.target, performance.now());
+  }, { capture: true, passive: true });
   const toolbar = '#mainTabs, #mini, #compactNav';
   document.addEventListener('touchstart', event => {
     document.body.classList.add('touch-input');
@@ -11,21 +15,26 @@
     const control = event.target.closest('[data-act]');
     if (!control || control.matches(':disabled') || control.closest('[inert]')) return;
     const touch = event.changedTouches[0];
-    tap = { control, id: touch.identifier, x: touch.clientX, y: touch.clientY, moved: false };
+    const surface = control.closest('#pageScroll, #npQueue');
+    tap = { control, id: touch.identifier, x: touch.clientX, y: touch.clientY, started: performance.now(),
+      surface, scrollTop: surface?.scrollTop, moved: surface && performance.now() - (scrollTimes.get(surface) || -1000) < 200 };
   }, { capture: true, passive: true });
   document.addEventListener('touchmove', event => {
     if (!tap) return;
     const touch = [...event.changedTouches].find(t => t.identifier === tap.id);
     if (!touch || event.touches.length !== 1) { tap = null; return; }
-    if (Math.hypot(touch.clientX - tap.x, touch.clientY - tap.y) > 10) tap.moved = true;
+    if (Math.hypot(touch.clientX - tap.x, touch.clientY - tap.y) > 6) tap.moved = true;
   }, { capture: true, passive: true });
   document.addEventListener('touchend', event => {
     const pending = tap; tap = null;
-    if (!pending || pending.moved || document.body.classList.contains('queue-gesturing') || !pending.control.isConnected || pending.control.closest('[inert]')) return;
+    if (!pending) return;
     const touch = [...event.changedTouches].find(t => t.identifier === pending.id);
-    if (!touch || Math.hypot(touch.clientX - pending.x, touch.clientY - pending.y) > 10) return;
+    if (!touch) return;
     if (event.cancelable) event.preventDefault();
     compatibilityClick = { x: touch.clientX, y: touch.clientY, until: performance.now() + 700 };
+    if (pending.moved || performance.now() - pending.started > 600 || Math.hypot(touch.clientX - pending.x, touch.clientY - pending.y) > 6
+        || (pending.surface && pending.surface.scrollTop !== pending.scrollTop)
+        || document.body.classList.contains('queue-gesturing') || !pending.control.isConnected || pending.control.closest('[inert]')) return;
     pending.control.click();
   }, { capture: true, passive: false });
   document.addEventListener('touchcancel', () => { tap = null; }, { capture: true, passive: true });
