@@ -74,9 +74,9 @@ document.addEventListener('pointerup', event => {
   if (gesture.locked) songSwipeClick = { x: event.clientX, y: event.clientY, until: performance.now() + 700 };
   resetSongSwipe();
   if (!valid || gesture.dx > -gesture.threshold) return;
-  addToQueue(gesture.track, { startIfEmpty: false });
+  playNext(gesture.track, { startIfEmpty: false });
   syncQueuedRows(); queueSwipeFeedback(gesture.row);
-  announceQueue(gesture.track.title + ' is in the queue');
+  announceQueue(gesture.track.title + ' added to Play next');
 }, { passive: true });
 document.addEventListener('pointercancel', event => { if (songSwipe?.pointer === event.pointerId) resetSongSwipe(); }, { passive: true });
 document.addEventListener('click', event => {

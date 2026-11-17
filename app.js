@@ -1175,10 +1175,13 @@ function cycleRepeat() {
   renderPlayer();
 }
 // "Play next" songs line up in the order you add them (first added plays first).
-function playNext(t) {
+function playNext(t, { startIfEmpty = true } = {}) {
   t = canon(t);
   if (!canBrowseTrack(t)) { toast('This song is not downloaded for offline listening'); return; }
-  if (!S.queue.length) return playList([t], 0);
+  if (!S.queue.length) {
+    if (startIfEmpty) return playList([t], 0);
+    addToQueue(t, { startIfEmpty: false }); toast('Up next'); return;
+  }
   S.queue.splice(S.qi + 1 + S.pn, 0, t);
   S.pn++;
   if (S.orig) S.orig.push(t);
@@ -1677,7 +1680,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 34</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 35</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${releaseWatchHTML()}

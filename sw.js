@@ -1,7 +1,7 @@
 // App-shell cache so Tunebox opens instantly and works offline.
 // Songs are NOT cached here — they live in IndexedDB (see app.js).
-const VERSION = 'tunebox-v34';
-const SHELL = ['./', 'index.html', 'app.css?v=34', 'app.js?v=34', 'song-swipes.js?v=34', 'home-mixes.js?v=34', 'dom-updates.js?v=34', 'drive-catalog.js?v=34', 'listening.js?v=34', 'glass.js?v=34', 'interactions.js?v=34', 'viewport.js?v=34', 'library.js?v=34', 'appearance.js?v=34', 'queue.js?v=34', 'manifest.webmanifest', 'assets/white-forest-photo.webp', 'assets/meteor-horizon.svg', 'assets/zoro-official.webp', 'assets/sophie-stars.webp',
+const VERSION = 'tunebox-v35';
+const SHELL = ['./', 'index.html', 'app.css?v=35', 'app.js?v=35', 'song-swipes.js?v=35', 'home-mixes.js?v=35', 'dom-updates.js?v=35', 'drive-catalog.js?v=35', 'listening.js?v=35', 'glass.js?v=35', 'interactions.js?v=35', 'viewport.js?v=35', 'library.js?v=35', 'appearance.js?v=35', 'queue.js?v=35', 'manifest.webmanifest', 'assets/white-forest-photo.webp', 'assets/meteor-horizon.svg', 'assets/zoro-official.webp', 'assets/sophie-stars.webp',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
