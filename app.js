@@ -133,6 +133,7 @@ applyAppearance();
 
 const audio = $('#audio');
 const artUrls = new Map();   // id -> object URL for stored artwork
+const decodedArtSources = new Set();
 
 function canon(t) { return S.tracks.get(t.id) || t; }
 function curTrack() { return S.queue[S.qi] || null; }
@@ -931,6 +932,7 @@ function loadArt(id, force = false) {
       await image.decode(); // Keep the current cover visible until its replacement is ready.
       if (artVersions.get(id) !== version || !S.tracks.get(id)?.hasArt) { URL.revokeObjectURL(url); return null; }
       const previous = artUrls.get(id);
+      decodedArtSources.add(url);
       artUrls.set(id, url);
       $$(`[data-tid="${CSS.escape(id)}"]`).forEach(el => swapArt(el, url));
       const current = curTrack();
@@ -952,6 +954,7 @@ function swapArt(el, url) {
   img.className = el.className.replace(/\bph\b/, '').trim();
   img.dataset.tid = el.dataset.tid;
   img.alt = '';
+  img.draggable = false;
   img.loading = 'eager';
   img.decoding = 'async';
   img.src = url;
@@ -959,7 +962,7 @@ function swapArt(el, url) {
 }
 function art(t, cls) {
   const src = artSrc(t);
-  if (src) return `<img class="${cls}" src="${esc(src)}" data-tid="${esc(t.id)}" alt="" loading="lazy" decoding="async">`;
+  if (src) { const ready = decodedArtSources.has(src); return `<img class="${cls}" src="${esc(src)}" data-tid="${esc(t.id)}" alt="" draggable="false" loading="${ready ? 'eager' : 'lazy'}" decoding="${ready ? 'sync' : 'async'}">`; }
   return `<div class="${cls} ph" data-tid="${esc(t.id)}" style="--h:${hue(t.id)}">${esc((t.title || '?').trim().charAt(0).toUpperCase() || '♪')}</div>`;
 }
 // Remote artwork failed (offline etc.) -> try the stored copy, else a placeholder.
@@ -986,6 +989,7 @@ document.addEventListener('error', e => {
 document.addEventListener('load', e => {
   const img = e.target;
   if (!(img instanceof HTMLImageElement) || !img.dataset.tid) return;
+  decodedArtSources.add(img.getAttribute('src'));
   const t = S.tracks.get(img.dataset.tid);
   if (t && t.artFailed) { t.artFailed = false; saveTrack(t); updateLookupStatus(); }
 }, true);
@@ -1178,17 +1182,21 @@ function playNext(t) {
   S.queue.splice(S.qi + 1 + S.pn, 0, t);
   S.pn++;
   if (S.orig) S.orig.push(t);
-  saveQueue(); renderQueue();
+  saveQueue(); renderQueue(); refreshRows();
   toast(S.pn === 1 ? 'Playing next' : `Playing next · ${S.pn} lined up`);
   if (settings.autoSave && S.pn === 1) cacheTrack(t);
 }
-function addToQueue(t) {
+function addToQueue(t, { startIfEmpty = true } = {}) {
   t = canon(t);
   if (!canBrowseTrack(t)) { toast('This song is not downloaded for offline listening'); return; }
-  if (!S.queue.length) return playList([t], 0);
+  if (!S.queue.length) {
+    if (startIfEmpty) return playList([t], 0);
+    S.queue = [t]; S.qi = 0; S.pn = 0; S.orig = null; S.activeMix = null; S.restorePos = 0;
+    saveQueue(); renderPlayer(); refreshRows(); toast('Added to queue'); return;
+  }
   S.queue.push(t);
   if (S.orig) S.orig.push(t);
-  saveQueue(); renderQueue(); toast('Added to queue');
+  saveQueue(); renderQueue(); refreshRows(); toast('Added to queue');
 }
 function saveQueue() {
   schedulePreparation();
@@ -1518,12 +1526,11 @@ function fillIcons(root) { $$('[data-icon]', root).forEach(el => { el.innerHTML 
 
 /* ---------------- UI: views ---------------- */
 function row(list, t, i, act = 'play') {
-  const c = curTrack();
-  const st = S.cached.has(t.id) ? '<span class="dot saved"></span>' : S.downloading.has(t.id) ? '<span class="dot dl"></span>' : '';
-  return `<div class="row${c && c.id === t.id ? ' cur' : ''}" data-track-id="${esc(t.id)}" data-list="${esc(list)}" data-i="${i}">
-    ${art(t, 'art')}
-    <div class="meta"><div class="t">${esc(t.title)}</div><div class="a">${st}<span class="x">${esc(t.artist)}${t.duration ? ' · ' + fmt(t.duration) : ''}</span></div></div>
-    <button class="icon song-play" data-act="${act}" data-list="${esc(list)}" data-i="${i}" aria-label="Play ${esc(t.title)}">${icon('play')}</button><button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button></div>`;
+  const current = curTrack(), swipe = list !== 'queue', queued = swipe && queuedTrackIds().has(t.id);
+  const status = S.cached.has(t.id) ? '<span class="dot saved"></span>' : S.downloading.has(t.id) ? '<span class="dot dl"></span>' : '';
+  const content = `${art(t, 'art')}<div class="meta"><div class="t">${esc(t.title)}</div><div class="a">${status}${swipe ? `<span class="in-queue-indicator" aria-label="In queue" title="In queue">${icon('list')}</span>` : ''}<span class="x">${esc(t.artist)}${t.duration ? ' &middot; ' + fmt(t.duration) : ''}</span></div></div>
+    <button class="icon song-play" data-act="${act}" data-list="${esc(list)}" data-i="${i}" aria-label="Play ${esc(t.title)}">${icon('play')}</button><button class="icon more" data-act="more" data-list="${esc(list)}" data-i="${i}" aria-label="More">${icon('more')}</button>`;
+  return `<div class="row${current?.id === t.id ? ' cur' : ''}${queued ? ' is-queued' : ''}" data-track-id="${esc(t.id)}" data-list="${esc(list)}" data-i="${i}"${swipe ? ' data-swipe-queue' : ''}>${swipe ? `<div class="row-content">${content}</div>` : content}</div>`;
 }
 function rows(list, arr, act) {
   arr = arr.filter(canBrowseTrack);
@@ -1545,7 +1552,7 @@ function viewSearch() {
       <button data-act="src" data-src="mine" class="${searchSource() === 'mine' ? 'on' : ''}">Library</button>
     </div>
     <form id="searchForm" autocomplete="off"><input id="q" class="searchbox" type="search" enterkeyhint="search" placeholder="${searchSource() === 'mine' ? 'Search your saved songs' : 'Songs, artists'}" value="${esc(S.q)}"></form>
-    <div id="results"></div>`;
+    <div id="results" data-live-content="search-results"></div>`;
 }
 function renderResults() {
   const el = $('#results');
@@ -1670,7 +1677,7 @@ function viewList() {
   return h;
 }
 function viewSettings() {
-  return `<h1>Settings</h1><p class="small">Tunebox · Version 33</p>
+  return `<h1>Settings</h1><p class="small">Tunebox · Version 34</p>
   ${libraryDownloadHTML()}
   <div class="group"><label class="set-row"><span>Keep the music going<small>When your queue runs low, add songs from your library using artists, favorites and listening history. Offline, use downloads only.</small></span><input type="checkbox" class="switch" id="autoplay" ${settings.autoplay ? 'checked' : ''}></label></div>
   ${releaseWatchHTML()}
@@ -1714,7 +1721,14 @@ async function updateStorageInfo() {
   el.innerHTML = h;
 }
 
+let retainedSearchView = null;
 function render({ background = false } = {}) {
+  const leavingSearch = document.body.dataset.view === 'search' && S.tab !== 'search' && $('#view #searchForm');
+  if (leavingSearch) {
+    const fragment = document.createDocumentFragment();
+    while ($('#view').firstChild) fragment.appendChild($('#view').firstChild);
+    retainedSearchView = { fragment, query: S.q, source: searchSource() };
+  }
   document.body.dataset.view = S.tab;
   if (!background) setDockCompact(false, 'view');
   $('#compactTabIcon').innerHTML = icon(S.tab === 'library' ? 'library' : S.tab);
@@ -1731,7 +1745,9 @@ function render({ background = false } = {}) {
   else if (S.tab === 'search') h = viewSearch();
   else if (S.tab === 'library') h = S.sub ? viewList() : viewLibrary();
   else h = viewSettings();
-  if (background) patchContent(v, h); else v.innerHTML = h;
+  if (S.tab === 'search' && retainedSearchView?.query === S.q && retainedSearchView.source === searchSource()) {
+    v.replaceChildren(retainedSearchView.fragment); retainedSearchView = null;
+  } else if (background) patchContent(v, h); else v.innerHTML = h;
   if (S.tab === 'search') renderResults();
   if (S.tab === 'settings') updateStorageInfo();
   if (S.sub?.type === 'mix-editor') renderMixCandidates();
@@ -1741,6 +1757,7 @@ let rrTimer = null;
 function refreshRows() {
   clearTimeout(rrTimer);
   rrTimer = setTimeout(() => {
+    syncQueuedRows();
     const c = curTrack();
     $$('.row').forEach(r => {
       const t = (S.lists[r.dataset.list] || [])[+r.dataset.i];
@@ -1768,6 +1785,7 @@ function renderPlayState() {
   $('#np').classList.toggle('paused', !playing);
   if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
   syncHomeContinue();
+  syncQueuedRows();
 }
 function syncHomeContinue() {
   const card = $('#view .continue-card'), track = curTrack();
@@ -2051,8 +2069,9 @@ const actions = {
   'queue-move': el => queueMoveMenu(el.dataset.i),
   'resume-current': () => { openNP(); if (!engPlaying()) togglePlay(); },
   tab: el => {
+    if (S.tab === 'search' && el.dataset.tab === 'search' && !S.sub) { $('#q')?.focus({ preventScroll: true }); return; }
     resetPageScroll(); S.tab = el.dataset.tab; S.sub = null; S.libraryTrail = []; render();
-    if (S.tab === 'search' && !S.results.length && !S.searching) doSearch();
+    if (S.tab === 'search' && (searchSource() === 'mine' || (!S.results.length && !S.searching))) doSearch();
     scrollPageTo(0, 0);
   },
   play: el => playList(S.lists[el.dataset.list], +el.dataset.i, { mix: mixForList(el.dataset.list) }),

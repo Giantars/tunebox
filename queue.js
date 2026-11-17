@@ -21,6 +21,7 @@ function removeQueuedTrack(index) {
   if (index <= S.qi + S.pn && S.pn > 0) S.pn--;
   if (S.orig) S.orig = S.queue.slice();
   saveQueue(); renderQueue(); announceQueue(`Removed ${track.title} from queue`);
+  refreshRows();
   return true;
 }
 function announceQueue(message) {

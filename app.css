@@ -643,3 +643,16 @@ body.search-keyboard #view{padding-bottom:20px}
 .home-pin{margin:4px 0 16px}.home-pin.on{color:var(--ac)}
 .release-highlights{display:grid;gap:10px;margin:14px 0 26px}.release-highlight{display:flex;align-items:center;gap:14px;width:100%;padding:12px;border-radius:16px;text-align:left;background:var(--s1);border:1px solid var(--line);color:var(--tx)}.release-highlight .art{width:76px;height:76px;border-radius:11px;flex:0 0 76px}.release-highlight .meta>*{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.release-highlight small{font-size:11px;color:var(--mu);margin-bottom:6px}.release-highlight strong{font-size:16px}.release-highlight .meta>span{font-size:12px;margin-top:8px;color:var(--ac)}.release-highlight .ic{width:12px;height:12px;vertical-align:-2px}
 @media(max-width:350px){.mood-card{padding:13px}.mood-copy strong{font-size:26px}.mood-card{min-height:178px}.mood-copy{min-height:150px}}
+
+
+/* A horizontal pull queues a song; idle rows do not create transform layers. */
+.row[data-swipe-queue]{display:block;overflow:hidden;touch-action:pan-y;--song-swipe:0px}
+.row-content{display:flex;align-items:center;gap:12px;min-height:70px;width:100%}
+.row[data-swipe-queue]::before{content:'Queue';position:absolute;right:0;top:5px;bottom:5px;width:var(--song-swipe);max-width:112px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:8px;overflow:hidden;visibility:hidden;border-radius:11px;background:#28654f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M3 5h14M3 10h14M3 15h7M17 14v8M13 18h8'/%3E%3C/svg%3E") no-repeat center 10px/23px 23px;color:#fff;font-size:10px;font-weight:600;pointer-events:none}
+.song-swiping::before,.song-swipe-done::before,.song-swipe-returning::before{visibility:visible!important}
+.song-swipe-ready::before,.song-swipe-done::before{background-color:#258160!important}
+.row.song-swipe-done::before{content:'Queued';background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 4 4L19 6'/%3E%3C/svg%3E")}
+.song-swiping>.row-content,.song-swipe-done>.row-content,.song-swipe-returning>.row-content{transform:translateX(calc(-1 * var(--song-swipe)))}
+.song-swipe-done>.row-content,.song-swipe-returning>.row-content{transition:transform .2s ease-out}
+.in-queue-indicator{display:none;color:var(--ac);flex:0 0 13px}.in-queue-indicator .ic{width:13px;height:13px}.is-queued .in-queue-indicator{display:inline-flex}
+@media(prefers-reduced-motion:reduce){.song-swipe-done>.row-content,.song-swipe-returning>.row-content{transition:none}}

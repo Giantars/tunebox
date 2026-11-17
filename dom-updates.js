@@ -33,10 +33,13 @@ function reconcileChildren(parent, source) {
       if (current.nodeType === Node.TEXT_NODE) { if (current.data !== next.data) current.data = next.data; }
       else if (current.nodeType === Node.ELEMENT_NODE) {
         const revealed = current.classList.contains('queue-entry') && current.classList.contains('revealed');
+        const swipeClasses = ['song-swiping', 'song-swipe-ready', 'song-swipe-done', 'song-swipe-returning'].filter(name => current.classList.contains(name));
+        const swipe = current.style.getPropertyValue('--song-swipe');
         for (const attribute of [...current.attributes]) if (!next.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
         for (const attribute of next.attributes) if (current.getAttribute(attribute.name) !== attribute.value) current.setAttribute(attribute.name, attribute.value);
         if (revealed) current.classList.add('revealed');
-        reconcileChildren(current, next);
+        if (swipeClasses.length) { current.classList.add(...swipeClasses); if (swipe) current.style.setProperty('--song-swipe', swipe); }
+        if (!(current.dataset.liveContent && !next.childNodes.length)) reconcileChildren(current, next);
       }
     }
     cursor = current.nextSibling;
